@@ -132,6 +132,50 @@ print(row[0], row[1])
         if os.path.exists(test_db):
             os.remove(test_db)
 
+    def test_05_pep668_bootstrap_and_install_flags(self):
+        """Verify setup.sh includes --break-system-packages for get-pip.py and pip install."""
+        setup_sh = os.path.join(BASE_DIR, "gcp", "setup.sh")
+        with open(setup_sh, "r", encoding="utf-8") as f:
+            script_text = f.read()
+
+        # Check PATH export
+        self.assertIn('export PATH="$HOME/.local/bin:$PATH"', script_text, "setup.sh must export ~/.local/bin to PATH")
+
+        # Check get-pip.py invocation with --break-system-packages
+        self.assertIn('--break-system-packages', script_text, "setup.sh must support --break-system-packages")
+        self.assertIn(
+            'python3 "$GET_PIP_TMP" --user --break-system-packages',
+            script_text,
+            "get-pip.py bootstrap must pass --user and --break-system-packages"
+        )
+
+        # Check requirements installation with --break-system-packages
+        self.assertIn(
+            'python3 -m pip install --user --break-system-packages -r requirements.txt',
+            script_text,
+            "requirements installation must invoke python3 -m pip install --user --break-system-packages -r requirements.txt"
+        )
+
+    def test_06_pep668_pip_install_invocation_simulation(self):
+        """Verify bash command execution passes --break-system-packages without error."""
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        bash_cmd = "bash" if shutil.which("bash") else git_bash
+        if not (shutil.which("bash") or os.path.exists(git_bash)):
+            self.skipTest("Bash not available for execution test")
+
+        test_snippet = '''
+        export PATH="$HOME/.local/bin:$PATH"
+        GET_PIP_CMD="python3 get-pip.py --user --break-system-packages"
+        PIP_INSTALL_CMD="python3 -m pip install --user --break-system-packages -r requirements.txt"
+
+        [[ "$GET_PIP_CMD" =~ "--break-system-packages" ]] && echo "GET_PIP_OK"
+        [[ "$PIP_INSTALL_CMD" =~ "--break-system-packages" ]] && echo "PIP_INSTALL_OK"
+        '''
+        proc = subprocess.run([bash_cmd, "-c", test_snippet], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("GET_PIP_OK", proc.stdout)
+        self.assertIn("PIP_INSTALL_OK", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

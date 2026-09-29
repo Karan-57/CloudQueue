@@ -66,7 +66,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 if ! python3 -m pip --version &>/dev/null; then
     echo "pip not found via 'python3 -m pip'. Attempting ensurepip..."
-    python3 -m ensurepip --user 2>/dev/null || true
+    python3 -m ensurepip --user --break-system-packages 2>/dev/null || python3 -m ensurepip --user 2>/dev/null || true
 fi
 
 if ! python3 -m pip --version &>/dev/null; then
@@ -80,7 +80,11 @@ if ! python3 -m pip --version &>/dev/null; then
         echo "Error: Neither curl nor wget is available to download get-pip.py." >&2
         exit 1
     fi
-    python3 "$GET_PIP_TMP" --user --no-warn-script-location
+    # Invoke get-pip.py with --user and --break-system-packages for PEP 668 environments
+    if ! python3 "$GET_PIP_TMP" --user --break-system-packages; then
+        echo "Retrying get-pip.py without --break-system-packages..."
+        python3 "$GET_PIP_TMP" --user || true
+    fi
     rm -f "$GET_PIP_TMP"
 fi
 
@@ -100,24 +104,14 @@ if [ ! -f "requirements.txt" ]; then
     exit 1
 fi
 
-PIP_ERR_LOG="/tmp/cloudqueue_pip_err_$$.log"
-if ! python3 -m pip install --user -r requirements.txt 2>"$PIP_ERR_LOG"; then
-    if grep -qi "break-system-packages" "$PIP_ERR_LOG" || grep -qi "externally-managed-environment" "$PIP_ERR_LOG"; then
-        echo "Detected PEP 668 externally managed environment."
-        echo "Retrying user installation with --break-system-packages..."
-        if ! python3 -m pip install --user --break-system-packages -r requirements.txt; then
-            echo "Error: Dependency installation failed with --break-system-packages." >&2
-            rm -f "$PIP_ERR_LOG"
-            exit 1
-        fi
-    else
-        cat "$PIP_ERR_LOG" >&2
-        rm -f "$PIP_ERR_LOG"
+# Attempt user-level installation with --break-system-packages for PEP 668 compatibility
+if ! python3 -m pip install --user --break-system-packages -r requirements.txt; then
+    echo "Retrying dependency installation without --break-system-packages (for older pip versions)..."
+    if ! python3 -m pip install --user -r requirements.txt; then
         echo "Error: Dependency installation from requirements.txt failed." >&2
         exit 1
     fi
 fi
-rm -f "$PIP_ERR_LOG"
 
 echo "Verifying google-cloud-pubsub import..."
 if ! python3 -c "from google.cloud import pubsub_v1; print('Pub/Sub library OK')" 2>&1; then
