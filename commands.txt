@@ -1,0 +1,18 @@
+sudo apt update\
+
+sudo apt install -y git
+
+sudo apt install -y cron
+
+git clone https://github.com/Karan-57/CloudQueue.git
+
+cd CloudQueue
+
+chmod +x gcp/*.sh
+
+./gcp/setup.sh
+
+python3 app.py
+
+optional: 
+ps aux | grep '[w]orker.py'
