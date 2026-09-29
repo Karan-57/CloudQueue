@@ -177,5 +177,77 @@ print(row[0], row[1])
         self.assertIn("PIP_INSTALL_OK", proc.stdout)
 
 
+    def test_07_git_installation_detection_logic(self):
+        """Verify setup.sh checks for git and installs it via apt if missing."""
+        setup_sh = os.path.join(BASE_DIR, "gcp", "setup.sh")
+        with open(setup_sh, "r", encoding="utf-8") as f:
+            script_text = f.read()
+
+        self.assertIn("command -v git", script_text)
+        self.assertIn("sudo apt update", script_text)
+        self.assertIn("sudo apt install -y git", script_text)
+        self.assertIn("Please install Git manually", script_text)
+
+    def test_08_firewall_setup_script(self):
+        """Verify gcp/setup_firewall.sh exists, has LF line endings, and is idempotent."""
+        fw_script = os.path.join(BASE_DIR, "gcp", "setup_firewall.sh")
+        self.assertTrue(os.path.isfile(fw_script), "gcp/setup_firewall.sh must exist")
+
+        with open(fw_script, "rb") as f:
+            content = f.read()
+        self.assertNotIn(b"\r\n", content, "setup_firewall.sh must have pure LF line endings")
+        self.assertTrue(content.startswith(b"#!/usr/bin/env bash"))
+
+        with open(fw_script, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("cloudqueue-allow-5000", text)
+        self.assertIn("tcp:5000", text)
+        self.assertIn("0.0.0.0/0", text)
+        self.assertIn("INGRESS", text)
+        # Idempotency check: describes rule before creating
+        self.assertIn("gcloud compute firewall-rules describe", text)
+        self.assertIn("gcloud compute firewall-rules create", text)
+
+        # Check bash syntax
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if os.path.exists(git_bash):
+            proc = subprocess.run([git_bash, "-n", fw_script], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, f"setup_firewall.sh syntax error: {proc.stderr}")
+
+    def test_09_backup_cron_setup_script(self):
+        """Verify gcp/setup_backup_cron.sh exists, has LF line endings, and is idempotent."""
+        cron_script = os.path.join(BASE_DIR, "gcp", "setup_backup_cron.sh")
+        self.assertTrue(os.path.isfile(cron_script), "gcp/setup_backup_cron.sh must exist")
+
+        with open(cron_script, "rb") as f:
+            content = f.read()
+        self.assertNotIn(b"\r\n", content, "setup_backup_cron.sh must have pure LF line endings")
+        self.assertTrue(content.startswith(b"#!/usr/bin/env bash"))
+
+        with open(cron_script, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("*/5 * * * *", text)
+        self.assertIn("backup_db.sh", text)
+        # Idempotency: filters out existing entry before adding
+        self.assertIn("grep -v", text)
+
+        # Check bash syntax
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if os.path.exists(git_bash):
+            proc = subprocess.run([git_bash, "-n", cron_script], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, f"setup_backup_cron.sh syntax error: {proc.stderr}")
+
+    def test_10_setup_sh_integrates_firewall_and_cron(self):
+        """Verify gcp/setup.sh calls setup_firewall.sh and setup_backup_cron.sh and displays cron schedule."""
+        setup_sh = os.path.join(BASE_DIR, "gcp", "setup.sh")
+        with open(setup_sh, "r", encoding="utf-8") as f:
+            script_text = f.read()
+
+        self.assertIn("setup_firewall.sh", script_text)
+        self.assertIn("setup_backup_cron.sh", script_text)
+        self.assertIn("Installed Backup Cron", script_text)
+
+
 if __name__ == "__main__":
     unittest.main()
+

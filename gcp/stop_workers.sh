@@ -42,7 +42,7 @@ STOPPED_COUNT=0
 
 for pid_file in "${PID_FILES[@]}"; do
     if [ -f "$pid_file" ]; then
-        PID="$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')"
+        PID="$(head -n 1 "$pid_file" 2>/dev/null | tr -d '[:space:]')"
         WORKER_NUM="$(basename "$pid_file" .pid | sed 's/worker-//')"
         WORKER_ID="Worker-$WORKER_NUM"
 

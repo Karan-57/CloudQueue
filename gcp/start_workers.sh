@@ -58,7 +58,7 @@ EXISTING_PIDS=("$PID_DIR"/worker-*.pid)
 ACTIVE_WORKERS=0
 for pid_file in "${EXISTING_PIDS[@]}"; do
     if [ -f "$pid_file" ]; then
-        PID="$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')"
+        PID="$(head -n 1 "$pid_file" 2>/dev/null | tr -d '[:space:]')"
         if [ -n "$PID" ] && is_pid_running "$PID"; then
             ACTIVE_WORKERS=$((ACTIVE_WORKERS + 1))
         else
@@ -97,7 +97,7 @@ for ((i = 1; i <= WORKER_COUNT; i++)); do
     LOG_FILE="$LOG_DIR/worker-$i.log"
 
     # Start worker process in background
-    nohup "$PYTHON_CMD" worker.py --worker-id "$WORKER_ID" --mode gcp >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON_CMD" worker.py --worker-id "$WORKER_ID" --worker-mode normal --mode gcp >> "$LOG_FILE" 2>&1 &
     WORKER_PID=$!
     echo "$WORKER_PID" > "$PID_FILE"
 

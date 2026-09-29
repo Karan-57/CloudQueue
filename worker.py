@@ -239,7 +239,7 @@ def complete_job(conn, job_id, submitted_at, started_at, completed_at, experimen
     return processing_time, waiting_time, total_latency
 
 
-def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_id=None):
+def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_id=None, worker_mode="normal"):
     """
     GCP Pub/Sub Worker execution loop.
     Multiple workers pull from the SAME shared Pub/Sub subscription.
@@ -247,6 +247,7 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
     """
     context_label = f"[{worker_id}" + (f":{experiment_id}]" if experiment_id else "]")
     print(f"{context_label} GCP Pub/Sub Worker started (PID: {os.getpid()}).")
+    print(f"{context_label} Worker mode: {worker_mode}")
     print(f"{context_label} Project: {config.GOOGLE_CLOUD_PROJECT or '(mock/local)'}, Sub: {config.PUBSUB_SUBSCRIPTION}")
     print(f"{context_label} Target Queue: {'experiment_jobs (' + experiment_id + ')' if experiment_id else 'jobs (standard)'}")
 
@@ -380,20 +381,22 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
         print(f"{context_label} Stopped. Total jobs processed: {jobs_processed}")
 
 
-def run_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_id=None, mode=None):
+def run_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_id=None, mode=None, worker_mode="normal"):
     if mode is None:
         mode = config.CLOUDQUEUE_MODE
 
     context_label = f"[{worker_id}" + (f":{experiment_id}]" if experiment_id else "]")
 
     print(f"{context_label} Worker started (PID: {os.getpid()}) in '{mode}' mode.")
+    print(f"{context_label} Worker mode: {worker_mode}")
 
     if mode == "gcp":
         run_gcp_worker(
             worker_id=worker_id,
             poll_interval=poll_interval,
             exit_when_empty=exit_when_empty,
-            experiment_id=experiment_id
+            experiment_id=experiment_id,
+            worker_mode=worker_mode
         )
         return
 
@@ -402,11 +405,14 @@ def run_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_i
     jobs_processed = 0
     empty_notified = False
 
-    print(f"{context_label} Target Queue: {'experiment_jobs (' + experiment_id + ')' if experiment_id else 'jobs (standard)'}")
+    target_queue_name = f"experiment_jobs ({experiment_id})" if (worker_mode == "experiment" and experiment_id) else "jobs (standard)"
+    print(f"{context_label} Target Queue: {target_queue_name}")
 
     try:
         while True:
-            job = claim_job(conn, worker_id, experiment_id=experiment_id)
+            # If experiment mode, only claim matching experiment_id; otherwise claim normal jobs
+            claim_exp_id = experiment_id if worker_mode == "experiment" else None
+            job = claim_job(conn, worker_id, experiment_id=claim_exp_id)
 
             if job is not None:
                 empty_notified = False
@@ -418,7 +424,7 @@ def run_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_i
                 work_start, work_end = execute_workload(workload_type)
 
                 p_time, w_time, t_lat = complete_job(
-                    conn, job_id, submitted_at, work_start, work_end, experiment_id=experiment_id
+                    conn, job_id, submitted_at, work_start, work_end, experiment_id=claim_exp_id
                 )
 
                 jobs_processed += 1
@@ -428,14 +434,14 @@ def run_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_i
                 if exit_when_empty:
                     # Brief verification to avoid premature exit during rapid burst inserts
                     time.sleep(0.15)
-                    job_retry = claim_job(conn, worker_id, experiment_id=experiment_id)
+                    job_retry = claim_job(conn, worker_id, experiment_id=claim_exp_id)
                     if job_retry is None:
                         print(f"{context_label} Queue empty. Exiting (--exit-when-empty enabled).")
                         break
                     else:
                         job_id, job_name, workload_type, submitted_at = job_retry
                         work_start, work_end = execute_workload(workload_type)
-                        complete_job(conn, job_id, submitted_at, work_start, work_end, experiment_id=experiment_id)
+                        complete_job(conn, job_id, submitted_at, work_start, work_end, experiment_id=claim_exp_id)
                         jobs_processed += 1
                 else:
                     if not empty_notified:
@@ -457,6 +463,13 @@ if __name__ == "__main__":
         type=str,
         default=os.environ.get("WORKER_ID", f"worker-{os.getpid()}"),
         help="Unique identifier for this worker instance"
+    )
+    parser.add_argument(
+        "--worker-mode",
+        type=str,
+        default=None,
+        choices=["normal", "experiment"],
+        help="Worker mode: 'normal' for standard jobs, 'experiment' for isolated experiment jobs"
     )
     parser.add_argument(
         "--poll-interval",
@@ -485,10 +498,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    worker_mode = args.worker_mode
+    if not worker_mode:
+        worker_mode = "experiment" if args.experiment_id else "normal"
+
     run_worker(
         worker_id=args.worker_id,
         poll_interval=args.poll_interval,
         exit_when_empty=args.exit_when_empty,
         experiment_id=args.experiment_id,
-        mode=args.mode
+        mode=args.mode,
+        worker_mode=worker_mode
     )

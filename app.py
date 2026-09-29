@@ -7,6 +7,7 @@ import threading
 import subprocess
 import json
 import config
+import worker_manager
 
 app = Flask(__name__)
 
@@ -136,6 +137,13 @@ def submit_job():
     job_id = cursor.lastrowid
     conn.close()
 
+    # Ensure normal worker is running to process normal jobs (if no experiment is active)
+    if worker_manager.get_experiment_worker_count() == 0:
+        try:
+            worker_manager.ensure_normal_worker_running()
+        except Exception:
+            pass
+
     # GCP Mode: Publish to Pub/Sub
     if config.is_gcp_mode():
         try:
@@ -193,6 +201,13 @@ def submit_batch():
     first_id = job_ids[0] if job_ids else 1
     last_id = job_ids[-1] if job_ids else count
     conn.close()
+
+    # Ensure normal worker is running to process normal jobs (if no experiment is active)
+    if worker_manager.get_experiment_worker_count() == 0:
+        try:
+            worker_manager.ensure_normal_worker_running()
+        except Exception:
+            pass
 
     # GCP Mode: Publish batch to Pub/Sub
     if config.is_gcp_mode():
@@ -354,98 +369,172 @@ def reset_queue():
 # Isolated Experiment System (Multi-Worker Burst Scaling Studies)
 # ==============================================================================
 
-def _run_experiment_orchestrator(experiment_id, worker_count):
+def _run_experiment_orchestrator(experiment_id, worker_count, exp_job_ids):
     """
-    Background orchestrator thread.
-    Spawns exactly `worker_count` independent worker processes targeting
-    `experiment_jobs` for this specific `experiment_id`.
-    When workers terminate, aggregates metrics and updates the experiment record.
+    Background orchestrator thread implementing the strict experiment lifecycle:
+    1. Stop/pause normal worker.
+    2. Verify normal worker has actually stopped.
+    3. Start exactly the requested number of experiment workers.
+    4. Give all experiment workers experiment filtering.
+    5. Verify that exactly N experiment workers are alive before submitting/processing.
+    6. Submit/publish experiment jobs (Pub/Sub in GCP mode).
+    7. Wait until the experiment is completed.
+    8. Stop ALL experiment workers belonging to that experiment.
+    9. Verify that all experiment workers have stopped.
+    10. Start exactly ONE normal worker again.
+    11. Verify that the normal worker is alive.
+    12. Mark the experiment as completed only after cleanup/recovery is successful.
     """
-    processes = []
-    for i in range(1, worker_count + 1):
-        worker_id = f"exp-{experiment_id}-w{i}"
-        cmd = [
-            sys.executable,
-            "worker.py",
-            "--experiment-id", experiment_id,
-            "--worker-id", worker_id,
-            "--mode", config.CLOUDQUEUE_MODE,
-            "--exit-when-empty",
-            "--poll-interval", "0.1"
-        ]
-        p = subprocess.Popen(cmd, env=os.environ.copy())
-        processes.append(p)
+    workers = []
+    startup_failed = False
+    error_msg = None
 
-    for p in processes:
-        p.wait()
+    try:
+        # Step 1: Stop normal worker
+        worker_manager.stop_normal_worker()
 
-    # Finalize experiment metrics
-    now = time.time()
-    conn = get_db()
-    cursor = conn.cursor()
+        # Step 2: Verify normal worker has stopped
+        if worker_manager.get_normal_worker_count() > 0:
+            raise RuntimeError("Failed to stop normal worker before starting experiment.")
 
-    cursor.execute("SELECT started_at, job_count FROM experiments WHERE experiment_id = ?", (experiment_id,))
-    exp_meta = cursor.fetchone()
-    started_at = exp_meta[0] if exp_meta else now
-    job_count = exp_meta[1] if exp_meta else 0
+        # Clean stale experiment workers from prior runs
+        worker_manager.stop_stale_experiment_workers()
 
-    total_time = round(now - started_at, 3)
+        # Step 3 & 4: Start exactly N experiment workers with experiment filtering
+        workers = worker_manager.start_experiment_workers(
+            experiment_id=experiment_id,
+            worker_count=worker_count,
+            exit_when_empty=True,
+            poll_interval=0.1
+        )
 
-    cursor.execute("SELECT COUNT(*) FROM experiment_jobs WHERE experiment_id = ? AND status = 'Completed'", (experiment_id,))
-    completed_jobs = cursor.fetchone()[0]
+        # Step 5: Verify that exactly N experiment worker processes are alive
+        alive_count = worker_manager.get_experiment_worker_count(experiment_id)
+        if alive_count != worker_count:
+            raise RuntimeError(f"Expected {worker_count} active experiment workers, but {alive_count} were found alive.")
 
-    cursor.execute("SELECT COUNT(*) FROM experiment_jobs WHERE experiment_id = ? AND status = 'Failed'", (experiment_id,))
-    failed_jobs = cursor.fetchone()[0]
+        # Step 6 & 7: Wait until workers exit (they exit when empty)
+        for p in workers:
+            try:
+                p.wait(timeout=300)
+            except Exception:
+                pass
 
-    cursor.execute("SELECT AVG(waiting_time) FROM experiment_jobs WHERE experiment_id = ? AND waiting_time IS NOT NULL", (experiment_id,))
-    avg_wait = cursor.fetchone()[0] or 0.0
+        # Brief confirmation loop that SQLite jobs are done
+        poll_start = time.time()
+        while time.time() - poll_start < 15.0:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM experiment_jobs WHERE experiment_id = ? AND status IN ('Queued', 'Processing')", (experiment_id,))
+            remaining = cursor.fetchone()[0]
+            conn.close()
+            if remaining == 0:
+                break
+            time.sleep(0.1)
 
-    cursor.execute("SELECT AVG(processing_time) FROM experiment_jobs WHERE experiment_id = ? AND processing_time IS NOT NULL", (experiment_id,))
-    avg_proc = cursor.fetchone()[0] or 0.0
+    except Exception as e:
+        startup_failed = True
+        error_msg = str(e)
+        try:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE experiments SET status = 'Failed' WHERE experiment_id = ?", (experiment_id,))
+            cursor.execute("UPDATE experiment_jobs SET status = 'Failed' WHERE experiment_id = ? AND status = 'Queued'", (experiment_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
-    cursor.execute("SELECT AVG(total_latency) FROM experiment_jobs WHERE experiment_id = ? AND total_latency IS NOT NULL", (experiment_id,))
-    avg_lat = cursor.fetchone()[0] or 0.0
+    finally:
+        # Step 8: Stop ALL experiment workers belonging to that experiment
+        worker_manager.stop_experiment_workers(experiment_id)
 
-    throughput = round(completed_jobs / total_time, 2) if total_time > 0 else 0.0
+        # Step 9: Verify that all experiment workers have stopped
+        exp_alive = worker_manager.get_experiment_worker_count(experiment_id)
+        if exp_alive > 0:
+            worker_manager.stop_experiment_workers(experiment_id, timeout=1.0)
 
-    cursor.execute("""
-        SELECT worker_id, COUNT(*)
-        FROM experiment_jobs
-        WHERE experiment_id = ? AND status = 'Completed' AND worker_id IS NOT NULL
-        GROUP BY worker_id
-        ORDER BY worker_id
-    """, (experiment_id,))
-    w_rows = cursor.fetchall()
-    worker_distribution = {r[0]: r[1] for r in w_rows}
+        # Step 10: Start exactly ONE normal worker again
+        try:
+            worker_manager.start_normal_worker()
+        except Exception:
+            pass
 
-    cursor.execute("""
-        UPDATE experiments
-        SET status = 'Completed',
-            completed_at = ?,
-            total_time = ?,
-            completed_jobs = ?,
-            failed_jobs = ?,
-            average_waiting_time = ?,
-            average_processing_time = ?,
-            average_total_latency = ?,
-            throughput = ?,
-            worker_distribution = ?
-        WHERE experiment_id = ?
-    """, (
-        now,
-        total_time,
-        completed_jobs,
-        failed_jobs,
-        round(avg_wait, 3),
-        round(avg_proc, 3),
-        round(avg_lat, 3),
-        throughput,
-        json.dumps(worker_distribution),
-        experiment_id
-    ))
+        # Step 11: Verify that the normal worker is alive
+        if worker_manager.get_normal_worker_count() != 1:
+            time.sleep(0.2)
+            try:
+                worker_manager.start_normal_worker()
+            except Exception:
+                pass
 
-    conn.commit()
-    conn.close()
+        # Step 12: Mark the experiment as completed only after cleanup/recovery is successful
+        if not startup_failed:
+            now = time.time()
+            conn = get_db()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT started_at FROM experiments WHERE experiment_id = ?", (experiment_id,))
+            exp_meta = cursor.fetchone()
+            started_at = exp_meta[0] if exp_meta and exp_meta[0] else now
+
+            total_time = round(now - started_at, 3)
+
+            cursor.execute("SELECT COUNT(*) FROM experiment_jobs WHERE experiment_id = ? AND status = 'Completed'", (experiment_id,))
+            completed_jobs = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM experiment_jobs WHERE experiment_id = ? AND status = 'Failed'", (experiment_id,))
+            failed_jobs = cursor.fetchone()[0]
+
+            cursor.execute("SELECT AVG(waiting_time) FROM experiment_jobs WHERE experiment_id = ? AND waiting_time IS NOT NULL", (experiment_id,))
+            avg_wait = cursor.fetchone()[0] or 0.0
+
+            cursor.execute("SELECT AVG(processing_time) FROM experiment_jobs WHERE experiment_id = ? AND processing_time IS NOT NULL", (experiment_id,))
+            avg_proc = cursor.fetchone()[0] or 0.0
+
+            cursor.execute("SELECT AVG(total_latency) FROM experiment_jobs WHERE experiment_id = ? AND total_latency IS NOT NULL", (experiment_id,))
+            avg_lat = cursor.fetchone()[0] or 0.0
+
+            throughput = round(completed_jobs / total_time, 2) if total_time > 0 else 0.0
+
+            cursor.execute("""
+                SELECT worker_id, COUNT(*)
+                FROM experiment_jobs
+                WHERE experiment_id = ? AND status = 'Completed' AND worker_id IS NOT NULL
+                GROUP BY worker_id
+                ORDER BY worker_id
+            """, (experiment_id,))
+            w_rows = cursor.fetchall()
+            worker_distribution = {r[0]: r[1] for r in w_rows}
+
+            cursor.execute("""
+                UPDATE experiments
+                SET status = 'Completed',
+                    completed_at = ?,
+                    total_time = ?,
+                    completed_jobs = ?,
+                    failed_jobs = ?,
+                    average_waiting_time = ?,
+                    average_processing_time = ?,
+                    average_total_latency = ?,
+                    throughput = ?,
+                    worker_distribution = ?
+                WHERE experiment_id = ?
+            """, (
+                now,
+                total_time,
+                completed_jobs,
+                failed_jobs,
+                round(avg_wait, 3),
+                round(avg_proc, 3),
+                round(avg_lat, 3),
+                throughput,
+                json.dumps(worker_distribution),
+                experiment_id
+            ))
+
+            conn.commit()
+            conn.close()
 
 
 @app.route("/experiments/run", methods=["POST"])
@@ -513,10 +602,10 @@ def run_experiment():
                 "status": "Failed"
             }), 500
 
-    # Launch worker processes via background orchestrator thread (Flask never blocks)
+    # Launch worker processes & manage strict lifecycle via background orchestrator thread (Flask never blocks)
     orch_thread = threading.Thread(
         target=_run_experiment_orchestrator,
-        args=(experiment_id, worker_count),
+        args=(experiment_id, worker_count, exp_job_ids),
         daemon=True
     )
     orch_thread.start()
@@ -529,6 +618,11 @@ def run_experiment():
         "workload_type": workload_type,
         "status": "Running"
     })
+
+
+@app.route("/workers/status", methods=["GET"])
+def workers_status():
+    return jsonify(worker_manager.count_active_workers())
 
 
 @app.route("/experiments", methods=["GET"])
