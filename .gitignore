@@ -1,0 +1,29 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Runtime & Process management
+.gcp/
+
+# Python byte-code and cache
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.pyd
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# Temporary logs & diagnostics
+*.log
+.system_generated/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini

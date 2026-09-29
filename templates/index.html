@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CloudQueue Dashboard</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<div class="container">
+
+    <!-- HEADER -->
+    <header>
+        <div>
+            <h1><i class="fa-solid fa-cloud" style="color: #2563eb; margin-right: 8px;"></i>CloudQueue</h1>
+            <p>Comparative Cloud Workload Processing</p>
+        </div>
+
+        <div class="live">
+            <span></span> System Active
+        </div>
+    </header>
+
+
+    <!-- STATISTICS -->
+    <section class="dashboard">
+
+        <div class="stat-card">
+            <div class="icon">
+                <i class="fa-solid fa-layer-group" style="color: #2563eb;"></i>
+            </div>
+            <div>
+                <p>Total Jobs</p>
+                <h2 id="total">0</h2>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="icon">
+                <i class="fa-solid fa-circle-check" style="color: #16a34a;"></i>
+            </div>
+            <div>
+                <p>Completed</p>
+                <h2 id="completed">0</h2>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="icon">
+                <i class="fa-solid fa-hourglass-half" style="color: #d97706;"></i>
+            </div>
+            <div>
+                <p>Queued</p>
+                <h2 id="queued">0</h2>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="icon">
+                <i class="fa-solid fa-bolt" style="color: #8b5cf6;"></i>
+            </div>
+            <div>
+                <p>Average Time</p>
+                <h2 id="avgTime">0 s</h2>
+            </div>
+        </div>
+
+    </section>
+
+
+    <!-- SUBMIT WORKLOAD -->
+    <section class="card">
+
+        <div class="section-title">
+            <div>
+                <h2>Submit New Workload</h2>
+                <p>Create a job and add it to the processing queue.</p>
+            </div>
+        </div>
+
+        <div class="form">
+
+            <input
+                id="jobName"
+                type="text"
+                placeholder="Enter workload name">
+
+            <select id="workloadType">
+
+                <option value="CPU">
+                    CPU Calculation
+                </option>
+
+                <option value="DATA">
+                    Data Processing
+                </option>
+
+                <option value="TEXT">
+                    Text Processing
+                </option>
+
+            </select>
+
+            <button onclick="submitJob()">
+                <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>Submit Workload
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- JOB QUEUE -->
+    <section class="card">
+
+        <div class="section-title">
+
+            <div>
+                <h2>Workload Queue</h2>
+                <p>Monitor submitted workloads and their current status.</p>
+            </div>
+
+            <button class="refresh"
+                    onclick="refreshDashboard()">
+                <i class="fa-solid fa-arrows-rotate" style="margin-right: 6px;"></i>Refresh
+            </button>
+
+        </div>
+
+        <div id="jobs">
+            <p class="empty">No workloads submitted yet.</p>
+        </div>
+
+        <div id="jobsToggleContainer" style="text-align: center; margin-top: 18px; display: none;">
+            <button id="toggleJobsBtn" class="toggle-btn" onclick="toggleShowAllJobs()">
+                <i class="fa-solid fa-chevron-down" style="margin-right: 6px;"></i>View All Workloads
+            </button>
+        </div>
+
+    </section>
+
+
+    <!-- SCALING EXPERIMENTS (BURST TESTING) -->
+    <section class="card">
+
+        <div class="section-title">
+            <div>
+                <h2><i class="fa-solid fa-flask" style="color: #2563eb; margin-right: 8px;"></i>Scaling Experiments</h2>
+                <p>Study queue depth, burst handling, and horizontal worker scaling curves.</p>
+            </div>
+        </div>
+
+        <div class="form">
+
+            <select id="expWorkers" style="width: 170px;">
+                <option value="1">1 Worker</option>
+                <option value="2" selected>2 Workers</option>
+                <option value="4">4 Workers</option>
+                <option value="8">8 Workers</option>
+            </select>
+
+            <input
+                id="expJobs"
+                type="number"
+                min="1"
+                max="1000"
+                value="50"
+                placeholder="Number of jobs (e.g. 100)">
+
+            <select id="expWorkload">
+                <option value="CPU">CPU Calculation</option>
+                <option value="DATA">Data Processing</option>
+                <option value="TEXT">Text Processing</option>
+                <option value="Default">Default (Sleep)</option>
+            </select>
+
+            <button id="runExpBtn" onclick="runExperiment()">
+                <i class="fa-solid fa-play" style="margin-right: 6px;"></i>Run Experiment
+            </button>
+
+        </div>
+
+        <!-- ACTIVE / SELECTED EXPERIMENT DISPLAY -->
+        <div id="activeExpBox" class="exp-live-box" style="display: none;">
+
+            <div class="exp-header">
+                <div>
+                    <h3 id="expTitle" style="margin: 0;">EXP-001</h3>
+                    <p id="expSubtitle" style="margin: 4px 0 0; color: #64748b; font-size: 13px;">2 Workers | 50 Jobs | CPU</p>
+                </div>
+                <div>
+                    <span id="expStatusBadge" class="badge-running">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Running
+                    </span>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-container">
+                <div id="expProgressBar" class="progress-bar"></div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color: #475569;">
+                <span id="expProgressText">0 / 50 completed (0%)</span>
+                <span id="expElapsedText">Elapsed: 0.0 s</span>
+            </div>
+
+            <!-- Experiment Metrics Grid -->
+            <div id="expMetricsGrid" class="metrics-grid" style="display: none;">
+
+                <div class="metric-box">
+                    <h4 id="mTotalTime">0.0 s</h4>
+                    <p>Total Time</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mThroughput">0 j/s</h4>
+                    <p>Throughput</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mAvgWait">0.0 s</h4>
+                    <p>Avg Waiting Time</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mAvgProc">0.0 s</h4>
+                    <p>Avg Processing Time</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mAvgLat">0.0 s</h4>
+                    <p>Avg Latency</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mCompleted">0</h4>
+                    <p>Completed Jobs</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mFailed">0</h4>
+                    <p>Failed Jobs</p>
+                </div>
+
+                <div class="metric-box">
+                    <h4 id="mEfficiency">100%</h4>
+                    <p>Success Rate</p>
+                </div>
+
+            </div>
+
+            <!-- Worker Distribution Breakdown -->
+            <div id="expWorkerDistSection" style="margin-top: 15px; display: none;">
+                <strong style="font-size: 13px; color: #475569;">Worker Job Allocation:</strong>
+                <div id="expWorkerChips" class="worker-chips"></div>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- EXPERIMENT HISTORY -->
+    <section class="card">
+
+        <div class="section-title">
+            <div>
+                <h2><i class="fa-solid fa-clock-rotate-left" style="color: #2563eb; margin-right: 8px;"></i>Experiment History</h2>
+                <p>Select completed experiments to compare scalability, or click any row to review single metrics.</p>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <button id="compareExpBtn" class="compare-btn" onclick="compareSelectedExperiments()" style="background: #2563eb; color: white;">
+                    <i class="fa-solid fa-code-compare" style="margin-right: 6px;"></i>Compare Selected (<span id="selectedExpCount">0</span>)
+                </button>
+                <button class="refresh" onclick="loadExperimentHistory()">
+                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 6px;"></i>Refresh
+                </button>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="historyTable">
+                <thead>
+                    <tr>
+                        <th style="width: 40px; text-align: center;">
+                            <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAllExp(this)" title="Select All">
+                        </th>
+                        <th>Experiment ID</th>
+                        <th>Jobs</th>
+                        <th>Workers</th>
+                        <th>Workload</th>
+                        <th>Total Time</th>
+                        <th>Throughput</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                    <tr>
+                        <td colspan="9" class="empty">No experiments recorded yet.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </section>
+
+
+    <!-- EXPERIMENT SCALABILITY COMPARISON -->
+    <section id="expComparisonSection" class="card" style="display: none;">
+
+        <div class="section-title">
+            <div>
+                <h2><i class="fa-solid fa-chart-line" style="color: #2563eb; margin-right: 8px;"></i>Experiment Scalability Comparison</h2>
+                <p id="compSubtitle">Comparing scaling performance across worker counts.</p>
+            </div>
+
+            <button class="toggle-btn" onclick="closeComparison()">
+                <i class="fa-solid fa-xmark" style="margin-right: 6px;"></i>Close Comparison
+            </button>
+        </div>
+
+        <!-- Incompatibility / Validation Warning Banner -->
+        <div id="compErrorBanner" style="display: none; background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 16px; border-radius: 9px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <i class="fa-solid fa-triangle-exclamation" style="font-size: 20px; color: #dc2626; margin-top: 2px;"></i>
+                <div>
+                    <strong style="display: block; font-size: 15px; margin-bottom: 4px;">Incompatible Experiments Selected</strong>
+                    <span id="compErrorMessage">Selected experiments cannot be directly compared.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Valid Comparison Content -->
+        <div id="compValidContent" style="display: none;">
+
+            <!-- Side-by-Side Comparison Table -->
+            <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #1e293b;">
+                <i class="fa-solid fa-table-columns" style="color: #3b82f6; margin-right: 6px;"></i>Side-by-Side Metric Comparison
+            </h3>
+
+            <div class="table-container">
+                <table id="compMetricsTable">
+                    <thead>
+                        <tr id="compTableHeadRow">
+                            <th>Metric</th>
+                            <!-- Dynamically populated: 1 Worker, 2 Workers, ... -->
+                        </tr>
+                    </thead>
+                    <tbody id="compTableBody">
+                        <!-- Dynamically populated metric rows -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Charts Grid -->
+            <h3 style="margin: 30px 0 15px 0; font-size: 16px; color: #1e293b;">
+                <i class="fa-solid fa-chart-area" style="color: #3b82f6; margin-right: 6px;"></i>Worker Scaling Curves
+            </h3>
+
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h4><i class="fa-solid fa-stopwatch" style="color: #ef4444; margin-right: 6px;"></i>Total Time vs Workers (Lower is better)</h4>
+                    <canvas id="chartTotalTime"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h4><i class="fa-solid fa-gauge-high" style="color: #10b981; margin-right: 6px;"></i>Throughput vs Workers (Higher is better)</h4>
+                    <canvas id="chartThroughput"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h4><i class="fa-solid fa-hourglass-half" style="color: #f59e0b; margin-right: 6px;"></i>Avg Waiting Time vs Workers (Lower is better)</h4>
+                    <canvas id="chartWaitingTime"></canvas>
+                </div>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- PERFORMANCE COMPARISON -->
+    <section class="card">
+
+        <div class="section-title">
+
+            <div>
+                <h2>Performance Comparison</h2>
+                <p>Compare processing time for different workload types.</p>
+            </div>
+
+            <button onclick="loadComparison()">
+                <i class="fa-solid fa-chart-simple" style="margin-right: 6px;"></i>Show Comparison
+            </button>
+
+        </div>
+
+        <div class="table-container">
+
+            <table id="comparisonTable">
+
+                <thead>
+
+                    <tr>
+                        <th>Workload Type</th>
+                        <th>Total Jobs</th>
+                        <th>Average Processing Time</th>
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    <tr>
+                        <td colspan="3" class="empty">
+                            Click "Show Comparison"
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- CLOUD PLATFORM -->
+    <section class="card">
+
+        <h2>Cloud Platform Comparison</h2>
+
+        <div class="platforms">
+
+            <div class="platform">
+                <h3><i class="fa-solid fa-laptop-code" style="margin-right: 8px; color: #2563eb;"></i>Local</h3>
+                <p>Current Environment</p>
+                <span class="available">Active</span>
+            </div>
+
+            <div class="platform">
+                <h3><i class="fa-brands fa-google" style="margin-right: 8px; color: #ea4335;"></i>Google Cloud</h3>
+                <p>Cloud Run + Pub/Sub</p>
+                <span class="planned">Planned</span>
+            </div>
+
+            <div class="platform">
+                <h3><i class="fa-brands fa-aws" style="margin-right: 8px; color: #ff9900;"></i>AWS</h3>
+                <p>Future Comparison</p>
+                <span class="planned">Planned</span>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <footer>
+        CloudQueue © 2026 | Comparative Cloud Workload Processing
+    </footer>
+
+</div>
+
+
+<script src="/static/script.js"></script>
+
+</body>
+
+</html>
