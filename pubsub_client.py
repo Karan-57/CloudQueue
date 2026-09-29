@@ -23,24 +23,78 @@ class MockPubSubMessage:
 
 class MockPubSubBroker:
     """
-    In-memory Pub/Sub broker for offline testing and verification
+    Pub/Sub broker for offline testing and verification
     when GCP credentials / emulator are not present.
+    Supports in-memory operations and cross-process file-backed queueing via SQLite.
     Mimics exact Pub/Sub behavior: FIFO queue, ACKs, NACKs, and message IDs.
     """
-    def __init__(self):
+    def __init__(self, clear_db=False):
         import threading
         self.queue = []
         self.unacked = {}
         self._msg_counter = 0
         self._lock = threading.Lock()
+        self._ipc_db = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".gcp", "mock_pubsub.db")
+        self._init_ipc_db()
+        if clear_db:
+            self.reset()
+
+    def reset(self):
+        with self._lock:
+            self.queue.clear()
+            self.unacked.clear()
+            self._msg_counter = 0
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+                conn.execute("DELETE FROM mock_pubsub_queue")
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
+    def _init_ipc_db(self):
+        try:
+            os.makedirs(os.path.dirname(self._ipc_db), exist_ok=True)
+            import sqlite3
+            conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS mock_pubsub_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    topic TEXT,
+                    data BLOB,
+                    attrs TEXT,
+                    msg_id TEXT,
+                    ack_id TEXT UNIQUE,
+                    status TEXT,
+                    created_at REAL
+                );
+            """)
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
     def publish(self, topic: str, data: bytes, **attrs):
         with self._lock:
             self._msg_counter += 1
-            msg_id = f"mock-msg-{self._msg_counter}"
+            now = time.time()
+            msg_id = f"mock-msg-{os.getpid()}-{self._msg_counter}-{int(now * 1000)}"
             ack_id = f"ack-{msg_id}"
             msg = MockPubSubMessage(data=data, ack_id=ack_id, attributes=attrs)
             self.queue.append(msg)
+
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+                conn.execute("""
+                    INSERT INTO mock_pubsub_queue (topic, data, attrs, msg_id, ack_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, 'QUEUED', ?)
+                """, (topic, data, json.dumps(attrs), msg_id, ack_id, now))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
             
             class _Future:
                 def result(self, timeout=None):
@@ -56,7 +110,32 @@ class MockPubSubBroker:
                 self.unacked[msg.ack_id] = msg
                 received.append(msg)
                 count += 1
-            
+
+            if count < max_messages:
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+                    cursor = conn.cursor()
+                    needed = max_messages - count
+                    cursor.execute("""
+                        SELECT id, data, attrs, ack_id FROM mock_pubsub_queue
+                        WHERE status = 'QUEUED'
+                        ORDER BY id ASC
+                        LIMIT ?
+                    """, (needed,))
+                    rows = cursor.fetchall()
+                    for r in rows:
+                        row_id, r_data, r_attrs_json, r_ack = r
+                        cursor.execute("UPDATE mock_pubsub_queue SET status = 'UNACKED' WHERE id = ?", (row_id,))
+                        conn.commit()
+                        attrs = json.loads(r_attrs_json) if r_attrs_json else {}
+                        msg = MockPubSubMessage(data=r_data, ack_id=r_ack, attributes=attrs)
+                        self.unacked[r_ack] = msg
+                        received.append(msg)
+                    conn.close()
+                except Exception:
+                    pass
+
             class _PullResponse:
                 def __init__(self, msgs):
                     self.received_messages = msgs
@@ -66,6 +145,15 @@ class MockPubSubBroker:
         with self._lock:
             for aid in ack_ids:
                 self.unacked.pop(aid, None)
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+                cursor = conn.cursor()
+                cursor.executemany("DELETE FROM mock_pubsub_queue WHERE ack_id = ?", [(aid,) for aid in ack_ids])
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
     def modify_ack_deadline(self, subscription: str, ack_ids: List[str], ack_deadline_seconds: int = 0):
         with self._lock:
@@ -74,6 +162,15 @@ class MockPubSubBroker:
                     msg = self.unacked.pop(aid, None)
                     if msg:
                         self.queue.append(msg)
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self._ipc_db, timeout=10.0)
+                    cursor = conn.cursor()
+                    cursor.executemany("UPDATE mock_pubsub_queue SET status = 'QUEUED' WHERE ack_id = ?", [(aid,) for aid in ack_ids])
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
 
 
 _mock_broker = None

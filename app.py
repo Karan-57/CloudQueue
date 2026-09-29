@@ -373,7 +373,7 @@ def _run_experiment_orchestrator(experiment_id, worker_count):
             "--exit-when-empty",
             "--poll-interval", "0.1"
         ]
-        p = subprocess.Popen(cmd)
+        p = subprocess.Popen(cmd, env=os.environ.copy())
         processes.append(p)
 
     for p in processes:

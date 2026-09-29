@@ -5,6 +5,7 @@
 
 # Runtime & Process management
 .gcp/
+.gcp/local_db_backups/
 
 # Python byte-code and cache
 __pycache__/
@@ -22,6 +23,9 @@ ENV/
 # Temporary logs & diagnostics
 *.log
 .system_generated/
+*.db-wal
+*.db-shm
+*.db.tmp*
 
 # OS-generated files
 .DS_Store

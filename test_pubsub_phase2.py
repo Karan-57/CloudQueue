@@ -31,6 +31,20 @@ from app import app, init_db, get_db
 class TestPhase2PubSub(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.orig_env = {
+            "DATABASE_PATH": os.environ.get("DATABASE_PATH"),
+            "CLOUDQUEUE_MODE": os.environ.get("CLOUDQUEUE_MODE"),
+            "CLOUDQUEUE_MOCK_PUBSUB": os.environ.get("CLOUDQUEUE_MOCK_PUBSUB"),
+            "GOOGLE_CLOUD_PROJECT": os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            "PUBSUB_TOPIC": os.environ.get("PUBSUB_TOPIC"),
+            "PUBSUB_SUBSCRIPTION": os.environ.get("PUBSUB_SUBSCRIPTION"),
+        }
+        cls.orig_db_path = config.DATABASE_PATH
+        cls.orig_mode = config.CLOUDQUEUE_MODE
+        cls.orig_project = config.GOOGLE_CLOUD_PROJECT
+        cls.orig_topic = config.PUBSUB_TOPIC
+        cls.orig_sub = config.PUBSUB_SUBSCRIPTION
+
         # Configure test database
         cls.test_db = os.path.join(BASE_DIR, "database", "test_phase2.db")
         os.environ["DATABASE_PATH"] = cls.test_db
@@ -52,6 +66,25 @@ class TestPhase2PubSub(unittest.TestCase):
         app.config["TESTING"] = True
         cls.client = app.test_client()
 
+    @classmethod
+    def tearDownClass(cls):
+        for k, v in cls.orig_env.items():
+            if v is not None:
+                os.environ[k] = v
+            else:
+                os.environ.pop(k, None)
+        config.DATABASE_PATH = cls.orig_db_path
+        config.CLOUDQUEUE_MODE = cls.orig_mode
+        config.GOOGLE_CLOUD_PROJECT = cls.orig_project
+        config.PUBSUB_TOPIC = cls.orig_topic
+        config.PUBSUB_SUBSCRIPTION = cls.orig_sub
+        worker.DB = cls.orig_db_path
+        if os.path.exists(cls.test_db):
+            try:
+                os.remove(cls.test_db)
+            except OSError:
+                pass
+
     def setUp(self):
         # Fresh database tables for each test
         init_db()
@@ -63,7 +96,7 @@ class TestPhase2PubSub(unittest.TestCase):
         conn.close()
 
         # Reset mock broker
-        self.mock_broker = MockPubSubBroker()
+        self.mock_broker = MockPubSubBroker(clear_db=True)
         pubsub_client.set_clients(publisher=self.mock_broker, subscriber=self.mock_broker)
 
     # -------------------------------------------------------------------------
