@@ -1,9 +1,6 @@
 """
 CloudQueue Worker Process Manager
-Handles the lifecycle of CloudQueue worker processes:
-- Normal background workers (handling standard user jobs)
-- Isolated experiment workers (1, 2, 4, or 8 workers running isolated bursts)
-- Verification of process counts, PID tracking, and graceful cleanup/recovery
+Handles lifecycle, verification, and cleanup for normal and experiment worker processes.
 """
 
 import os
@@ -29,7 +26,7 @@ def _ensure_dirs():
 def is_pid_alive(pid: int) -> bool:
     """
     Safely checks if a process is alive across Windows and Unix.
-    Never sends destructive signals on Windows.
+    On Windows, uses kernel32 OpenProcess with query rights to avoid terminating the process.
     """
     if not pid or pid <= 0:
         return False
@@ -62,10 +59,7 @@ def is_pid_alive(pid: int) -> bool:
 
 
 def stop_pid(pid: int, timeout: float = 3.0) -> bool:
-    """
-    Gracefully stops a process by PID, escalating to force kill if needed.
-    Returns True if the process is no longer alive.
-    """
+    """Gracefully stops a process by PID, escalating to force kill if needed."""
     if not is_pid_alive(pid):
         return True
 
@@ -108,7 +102,7 @@ def _write_pid_file(filepath: str, pid: int, metadata: Dict[str, Any]):
 
 
 def _read_pid_file(filepath: str) -> Tuple[Optional[int], Dict[str, Any]]:
-    """Reads PID and metadata from a PID file. Cleans up file if invalid."""
+    """Reads PID and metadata from a PID file. Returns (pid, metadata)."""
     if not os.path.isfile(filepath):
         return None, {}
     try:
@@ -128,9 +122,23 @@ def _read_pid_file(filepath: str) -> Tuple[Optional[int], Dict[str, Any]]:
         return None, {}
 
 
-# ==============================================================================
-# Normal Worker Lifecycle (Single long-running worker for standard queue)
-# ==============================================================================
+def _spawn_worker(cmd: List[str], log_file: str) -> subprocess.Popen:
+    """Spawns a worker subprocess redirecting output to the specified log file."""
+    with open(log_file, "a", encoding="utf-8") as log_fp:
+        kwargs: Dict[str, Any] = {
+            "stdout": log_fp,
+            "stderr": log_fp,
+            "cwd": BASE_DIR,
+            "env": os.environ.copy()
+        }
+        if sys.platform != "win32":
+            kwargs["start_new_session"] = True
+        return subprocess.Popen(cmd, **kwargs)
+
+
+# ------------------------------------------------------------------------------
+# Normal Worker Lifecycle
+# ------------------------------------------------------------------------------
 
 NORMAL_PID_FILE = os.path.join(PID_DIR, "worker-normal.pid")
 
@@ -141,17 +149,14 @@ def get_normal_worker_count() -> int:
     if pid is not None:
         if is_pid_alive(pid):
             return 1
-        else:
-            # Stale PID file
-            try:
-                os.remove(NORMAL_PID_FILE)
-            except Exception:
-                pass
+        try:
+            os.remove(NORMAL_PID_FILE)
+        except Exception:
+            pass
     return 0
 
 
 def get_normal_worker_pid() -> Optional[int]:
-    """Returns the PID of the active normal worker, or None if not running."""
     pid, _ = _read_pid_file(NORMAL_PID_FILE)
     if pid is not None and is_pid_alive(pid):
         return pid
@@ -159,16 +164,12 @@ def get_normal_worker_pid() -> Optional[int]:
 
 
 def start_normal_worker() -> Optional[int]:
-    """
-    Starts exactly ONE normal worker if not already running.
-    Returns the worker PID.
-    """
+    """Starts exactly ONE normal worker if not already running."""
     _ensure_dirs()
     existing_pid = get_normal_worker_pid()
     if existing_pid:
         return existing_pid
 
-    # Clean any stale file
     if os.path.exists(NORMAL_PID_FILE):
         try:
             os.remove(NORMAL_PID_FILE)
@@ -185,21 +186,7 @@ def start_normal_worker() -> Optional[int]:
         "--poll-interval", "0.5"
     ]
 
-    log_fp = open(log_file, "a", encoding="utf-8")
-    env = os.environ.copy()
-
-    kwargs: Dict[str, Any] = {
-        "stdout": log_fp,
-        "stderr": log_fp,
-        "cwd": BASE_DIR,
-        "env": env
-    }
-
-    if sys.platform != "win32":
-        kwargs["start_new_session"] = True
-
-    proc = subprocess.Popen(cmd, **kwargs)
-    log_fp.close()
+    proc = _spawn_worker(cmd, log_file)
     pid = proc.pid
 
     metadata = {
@@ -210,7 +197,6 @@ def start_normal_worker() -> Optional[int]:
     }
     _write_pid_file(NORMAL_PID_FILE, pid, metadata)
 
-    # Verification pause
     time.sleep(0.2)
     if not is_pid_alive(pid):
         try:
@@ -223,10 +209,7 @@ def start_normal_worker() -> Optional[int]:
 
 
 def stop_normal_worker(timeout: float = 5.0) -> bool:
-    """
-    Stops the active normal worker and verifies it has stopped.
-    Returns True when normal worker is confirmed stopped.
-    """
+    """Stops the active normal worker and verifies it has stopped."""
     pid, _ = _read_pid_file(NORMAL_PID_FILE)
     if pid is not None:
         stop_pid(pid, timeout=timeout)
@@ -234,8 +217,6 @@ def stop_normal_worker(timeout: float = 5.0) -> bool:
             os.remove(NORMAL_PID_FILE)
         except Exception:
             pass
-
-    # Double check no normal worker is running
     return get_normal_worker_count() == 0
 
 
@@ -248,20 +229,15 @@ def ensure_normal_worker_running() -> Optional[int]:
     return get_normal_worker_pid()
 
 
-# ==============================================================================
-# Experiment Worker Lifecycle (Multi-process burst scaling isolation)
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# Experiment Worker Lifecycle
+# ------------------------------------------------------------------------------
 
 def stop_stale_experiment_workers(timeout: float = 5.0) -> int:
-    """
-    Finds and cleanly stops any leftover experiment workers from previous runs.
-    Returns the number of stale workers stopped.
-    """
+    """Stops leftover experiment workers from previous runs."""
     _ensure_dirs()
-    pattern = os.path.join(PID_DIR, "worker-exp-*.pid")
     stopped = 0
-
-    for pid_file in glob.glob(pattern):
+    for pid_file in glob.glob(os.path.join(PID_DIR, "worker-exp-*.pid")):
         pid, meta = _read_pid_file(pid_file)
         if pid is not None and is_pid_alive(pid):
             stop_pid(pid, timeout=timeout)
@@ -270,32 +246,24 @@ def stop_stale_experiment_workers(timeout: float = 5.0) -> int:
             os.remove(pid_file)
         except Exception:
             pass
-
     return stopped
 
 
 def get_experiment_worker_count(experiment_id: Optional[str] = None) -> int:
-    """Returns the number of currently active experiment workers."""
+    """Returns the count of currently active experiment workers."""
     _ensure_dirs()
-    pattern = os.path.join(PID_DIR, "worker-exp-*.pid")
     active = 0
-
-    for pid_file in glob.glob(pattern):
+    for pid_file in glob.glob(os.path.join(PID_DIR, "worker-exp-*.pid")):
         pid, meta = _read_pid_file(pid_file)
         if pid is not None:
             if is_pid_alive(pid):
-                if experiment_id:
-                    if meta.get("experiment_id") == experiment_id:
-                        active += 1
-                else:
+                if not experiment_id or meta.get("experiment_id") == experiment_id:
                     active += 1
             else:
-                # Stale PID file
                 try:
                     os.remove(pid_file)
                 except Exception:
                     pass
-
     return active
 
 
@@ -307,14 +275,12 @@ def start_experiment_workers(
 ) -> List[subprocess.Popen]:
     """
     Starts exactly `worker_count` independent worker processes targeting `experiment_id`.
-    Validates that exactly N processes are alive.
-    If startup fails for any worker, immediately aborts and cleans up.
+    Validates that all processes are alive, aborting on any failure.
     """
     if worker_count not in [1, 2, 4, 8]:
         raise ValueError(f"Invalid worker count {worker_count}. Must be 1, 2, 4, or 8.")
 
     _ensure_dirs()
-    # Clean stale experiment workers before starting new ones
     stop_stale_experiment_workers()
 
     processes: List[subprocess.Popen] = []
@@ -338,20 +304,7 @@ def start_experiment_workers(
             if exit_when_empty:
                 cmd.append("--exit-when-empty")
 
-            log_fp = open(log_file, "a", encoding="utf-8")
-            env = os.environ.copy()
-
-            kwargs: Dict[str, Any] = {
-                "stdout": log_fp,
-                "stderr": log_fp,
-                "cwd": BASE_DIR,
-                "env": env
-            }
-            if sys.platform != "win32":
-                kwargs["start_new_session"] = True
-
-            p = subprocess.Popen(cmd, **kwargs)
-            log_fp.close()
+            p = _spawn_worker(cmd, log_file)
             processes.append(p)
             pids.append(p.pid)
 
@@ -364,10 +317,8 @@ def start_experiment_workers(
             }
             _write_pid_file(pid_file, p.pid, metadata)
 
-        # Verification step: ensure all worker processes are actually alive
         time.sleep(0.2)
         alive_pids = [pid for pid in pids if is_pid_alive(pid)]
-
         if len(alive_pids) != worker_count:
             raise RuntimeError(
                 f"Experiment worker startup failed: requested {worker_count}, but only {len(alive_pids)} alive."
@@ -376,7 +327,6 @@ def start_experiment_workers(
         return processes
 
     except Exception as e:
-        # Guaranteed failure cleanup: terminate any workers that were started
         for pid in pids:
             stop_pid(pid, timeout=1.0)
         stop_stale_experiment_workers()
@@ -384,15 +334,10 @@ def start_experiment_workers(
 
 
 def stop_experiment_workers(experiment_id: Optional[str] = None, timeout: float = 5.0) -> int:
-    """
-    Stops all experiment workers (optionally matching `experiment_id`).
-    Verifies they have stopped and cleans up PID files.
-    """
+    """Stops all experiment workers (optionally matching `experiment_id`)."""
     _ensure_dirs()
-    pattern = os.path.join(PID_DIR, "worker-exp-*.pid")
     stopped = 0
-
-    for pid_file in glob.glob(pattern):
+    for pid_file in glob.glob(os.path.join(PID_DIR, "worker-exp-*.pid")):
         pid, meta = _read_pid_file(pid_file)
         if experiment_id and meta.get("experiment_id") != experiment_id:
             continue
@@ -409,25 +354,13 @@ def stop_experiment_workers(experiment_id: Optional[str] = None, timeout: float 
     return stopped
 
 
-# ==============================================================================
-# Worker Counting & System Status
-# ==============================================================================
-
 def count_active_workers() -> Dict[str, Any]:
-    """
-    Reusable mechanism to count and categorize all active CloudQueue workers.
-    Distinguishes:
-    - Normal workers
-    - Experiment workers (grouped by experiment_id)
-    - Total active workers
-    """
+    """Returns a breakdown of all currently active normal and experiment workers."""
     _ensure_dirs()
     normal_count = get_normal_worker_count()
 
     exp_counts: Dict[str, int] = {}
-    pattern = os.path.join(PID_DIR, "worker-exp-*.pid")
-
-    for pid_file in glob.glob(pattern):
+    for pid_file in glob.glob(os.path.join(PID_DIR, "worker-exp-*.pid")):
         pid, meta = _read_pid_file(pid_file)
         if pid is not None and is_pid_alive(pid):
             eid = meta.get("experiment_id", "unknown")
@@ -439,7 +372,6 @@ def count_active_workers() -> Dict[str, Any]:
                 pass
 
     total_exp = sum(exp_counts.values())
-
     return {
         "normal": normal_count,
         "experiment": total_exp,

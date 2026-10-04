@@ -1,13 +1,9 @@
 import json
-import logging
 import os
 import time
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Dict, Any
 import config
 
-logger = logging.getLogger("cloudqueue.pubsub")
-
-# Global singleton client instances (lazily initialized)
 _publisher = None
 _subscriber = None
 
@@ -23,10 +19,8 @@ class MockPubSubMessage:
 
 class MockPubSubBroker:
     """
-    Pub/Sub broker for offline testing and verification
-    when GCP credentials / emulator are not present.
-    Supports in-memory operations and cross-process file-backed queueing via SQLite.
-    Mimics exact Pub/Sub behavior: FIFO queue, ACKs, NACKs, and message IDs.
+    Offline Pub/Sub broker for testing without GCP credentials or emulator.
+    Provides in-memory queueing and SQLite IPC persistence matching Pub/Sub ACK/NACK behavior.
     """
     def __init__(self, clear_db=False):
         import threading
@@ -95,7 +89,7 @@ class MockPubSubBroker:
                 conn.close()
             except Exception:
                 pass
-            
+
             class _Future:
                 def result(self, timeout=None):
                     return msg_id
@@ -232,9 +226,7 @@ def get_topic_path(project_id: Optional[str] = None, topic_id: Optional[str] = N
     if not proj:
         if is_mock_enabled():
             return f"projects/mock-project/topics/{top}"
-        raise ValueError(
-            "GOOGLE_CLOUD_PROJECT environment variable must be set to use GCP Pub/Sub mode."
-        )
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable must be set to use GCP Pub/Sub mode.")
     pub = get_publisher()
     if hasattr(pub, "topic_path"):
         return pub.topic_path(proj, top)
@@ -248,9 +240,7 @@ def get_subscription_path(project_id: Optional[str] = None, subscription_id: Opt
     if not proj:
         if is_mock_enabled():
             return f"projects/mock-project/subscriptions/{sub}"
-        raise ValueError(
-            "GOOGLE_CLOUD_PROJECT environment variable must be set to use GCP Pub/Sub mode."
-        )
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable must be set to use GCP Pub/Sub mode.")
     subscriber = get_subscriber()
     if hasattr(subscriber, "subscription_path"):
         return subscriber.subscription_path(proj, sub)
@@ -260,11 +250,7 @@ def get_subscription_path(project_id: Optional[str] = None, subscription_id: Opt
 def publish_job(job_id: int, experiment_id: Optional[str] = None, timeout: float = 10.0) -> str:
     """
     Publishes a single job ID to the Pub/Sub topic.
-    Payload contains ONLY the existing SQLite job_id (and experiment_id if applicable).
-    
-    Structure:
-      Normal job: {"job_id": 416}
-      Experiment job: {"job_id": 417, "experiment_id": "EXP-008"}
+    Message payload contains only the SQLite job_id reference to keep Pub/Sub lightweight.
     """
     publisher = get_publisher()
     topic_path = get_topic_path()
@@ -275,8 +261,7 @@ def publish_job(job_id: int, experiment_id: Optional[str] = None, timeout: float
 
     data = json.dumps(payload).encode("utf-8")
     future = publisher.publish(topic_path, data=data)
-    message_id = future.result(timeout=timeout)
-    return str(message_id)
+    return str(future.result(timeout=timeout))
 
 
 def publish_jobs_batch(
@@ -284,10 +269,7 @@ def publish_jobs_batch(
     experiment_id: Optional[str] = None,
     timeout: float = 30.0
 ) -> List[str]:
-    """
-    Publishes multiple job IDs in batch to the Pub/Sub topic.
-    Returns the list of generated Pub/Sub message IDs.
-    """
+    """Publishes multiple job IDs in batch to the Pub/Sub topic."""
     publisher = get_publisher()
     topic_path = get_topic_path()
 
@@ -296,15 +278,9 @@ def publish_jobs_batch(
         payload = {"job_id": int(jid)}
         if experiment_id:
             payload["experiment_id"] = str(experiment_id)
-        data = json.dumps(payload).encode("utf-8")
-        future = publisher.publish(topic_path, data=data)
-        futures.append(future)
+        futures.append(publisher.publish(topic_path, data=json.dumps(payload).encode("utf-8")))
 
-    message_ids = []
-    for f in futures:
-        message_ids.append(str(f.result(timeout=timeout)))
-
-    return message_ids
+    return [str(f.result(timeout=timeout)) for f in futures]
 
 
 def pull_messages(
@@ -314,8 +290,7 @@ def pull_messages(
 ) -> List[Any]:
     """
     Pulls up to `max_messages` from the configured Pub/Sub subscription.
-    Returns a list of received message objects.
-    Catches DeadlineExceeded or timeout exceptions cleanly and returns [].
+    Returns [] on timeout or empty subscription.
     """
     subscriber = get_subscriber()
     sub_path = subscription_path or get_subscription_path()
@@ -334,7 +309,6 @@ def pull_messages(
     except (DeadlineExceeded, RetryError):
         return []
     except Exception as e:
-        # If timeout occurred inside gRPC
         if "deadline" in str(e).lower() or "timeout" in str(e).lower():
             return []
         raise e
@@ -357,7 +331,7 @@ def acknowledge_message(ack_id: str, subscription_path: Optional[str] = None):
 def nack_message(ack_id: str, subscription_path: Optional[str] = None):
     """
     NACKs a message by resetting its ack deadline to 0 seconds,
-    re-queuing it immediately for other available workers.
+    making it immediately available for other workers.
     """
     subscriber = get_subscriber()
     sub_path = subscription_path or get_subscription_path()
