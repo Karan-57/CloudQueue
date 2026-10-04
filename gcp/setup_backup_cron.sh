@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# CloudQueue: Database Backup Cron Job Setup
-# Installs an idempotent cron job to run backup_db.sh every 5 minutes.
-# Runs as the current VM user without requiring root/sudo privileges.
-# ==============================================================================
 
 set -eo pipefail
 
@@ -23,7 +18,6 @@ fi
 
 chmod +x "$BACKUP_SCRIPT" 2>/dev/null || true
 
-# Check if crontab command is available
 if ! command -v crontab &>/dev/null; then
     echo "Error: 'crontab' command is not available in PATH." >&2
     exit 1
@@ -36,13 +30,10 @@ CRON_JOB="$CRON_SCHEDULE /bin/bash \"$BACKUP_SCRIPT\" >> \"$LOG_FILE\" 2>&1 $CRO
 CURRENT_USER="$(whoami 2>/dev/null || id -un 2>/dev/null || echo "user")"
 echo "Configuring backup cron job for user: $CURRENT_USER..."
 
-# Read existing crontab (ignoring exit code if crontab is currently empty)
 EXISTING_CRON="$(crontab -l 2>/dev/null || true)"
 
-# Filter out any existing CloudQueue backup entries to prevent duplicates (idempotent)
 FILTERED_CRON="$(printf "%s\n" "$EXISTING_CRON" | grep -v "backup_db.sh" | grep -v "CloudQueue-Backup-Cron" || true)"
 
-# Install updated crontab
 if [ -n "$FILTERED_CRON" ]; then
     NEW_CRON="$(printf "%s\n%s\n" "$FILTERED_CRON" "$CRON_JOB")"
 else

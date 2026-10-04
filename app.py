@@ -16,7 +16,6 @@ def get_db():
     db_path = config.DATABASE_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30.0)
-    # WAL mode and busy timeout allow safe concurrent multi-process access
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
     return conn
@@ -110,10 +109,6 @@ def _format_job_row(row):
     }
 
 
-# ------------------------------------------------------------------------------
-# Standard Queue Routes
-# ------------------------------------------------------------------------------
-
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -136,7 +131,6 @@ def submit_job():
     job_id = cursor.lastrowid
     conn.close()
 
-    # Ensure normal worker is active if no experiment is running
     if worker_manager.get_experiment_worker_count() == 0:
         try:
             worker_manager.ensure_normal_worker_running()
@@ -329,19 +323,7 @@ def reset_queue():
     return jsonify({"message": "All standard jobs and queue reset successfully"})
 
 
-# ------------------------------------------------------------------------------
-# Isolated Experiment System
-# ------------------------------------------------------------------------------
-
 def _run_experiment_orchestrator(experiment_id, worker_count, exp_job_ids):
-    """
-    Background orchestrator ensuring clean experiment lifecycle:
-    1. Stop and verify normal worker is paused.
-    2. Start exactly N experiment workers targeting this experiment_id.
-    3. Wait for workers to finish the queued burst.
-    4. Terminate experiment workers and recover the normal background worker.
-    5. Aggregate metrics and mark the experiment Completed.
-    """
     workers = []
     startup_failed = False
 
@@ -396,7 +378,6 @@ def _run_experiment_orchestrator(experiment_id, worker_count, exp_job_ids):
         if worker_manager.get_experiment_worker_count(experiment_id) > 0:
             worker_manager.stop_experiment_workers(experiment_id, timeout=1.0)
 
-        # Restart and verify normal background worker
         try:
             worker_manager.start_normal_worker()
         except Exception:
@@ -724,7 +705,6 @@ def compare_experiments():
     workloads = set(r[3] for r in rows)
     job_counts = set(r[2] for r in rows)
 
-    # Fair comparison requirement: worker scaling comparison requires identical workload and job count
     if len(workloads) > 1 or len(job_counts) > 1:
         workload_str = ", ".join(sorted(workloads))
         job_count_str = ", ".join(str(j) for j in sorted(job_counts))

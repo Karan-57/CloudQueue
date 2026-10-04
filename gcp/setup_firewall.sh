@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# CloudQueue: GCP Firewall Rule Setup
-# Creates/configures a GCP firewall rule for port 5000:
-# - Direction: INGRESS
-# - Target: All instances in network
-# - Source ranges: 0.0.0.0/0
-# - Protocol/port: TCP 5000
-# - Rule name: cloudqueue-allow-5000
-# Idempotent: checks for existence before attempting creation.
-# ==============================================================================
 
 set -eo pipefail
 
@@ -23,7 +13,6 @@ echo " CloudQueue: GCP Firewall Rule Setup"
 echo " Rule Name: $RULE_NAME"
 echo "======================================================"
 
-# 1. Detect GCP Project
 if ! command -v gcloud &>/dev/null; then
     echo "Error: 'gcloud' CLI is not found in PATH." >&2
     exit 1
@@ -38,14 +27,12 @@ fi
 
 echo "Active GCP Project: $PROJECT_ID"
 
-# 2. Check if firewall rule already exists
 echo "Checking if firewall rule '$RULE_NAME' already exists..."
 if gcloud compute firewall-rules describe "$RULE_NAME" --project="$PROJECT_ID" &>/dev/null; then
     echo "Firewall rule '$RULE_NAME' already exists and is configured."
     exit 0
 fi
 
-# 3. Create firewall rule
 echo "Firewall rule '$RULE_NAME' not found. Creating rule..."
 if ! gcloud compute firewall-rules create "$RULE_NAME" \
     --direction=INGRESS \

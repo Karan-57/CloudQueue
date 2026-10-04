@@ -16,20 +16,18 @@
 
 <div class="container">
 
-    <!-- HEADER -->
     <header>
         <div>
             <h1><i class="fa-solid fa-cloud" style="color: #2563eb; margin-right: 8px;"></i>CloudQueue</h1>
             <p>Comparative Cloud Workload Processing</p>
         </div>
 
-        <div class="live">
+        <!-- <div class="live">
             <span></span> System Active
-        </div>
+        </div> -->
     </header>
 
 
-    <!-- STATISTICS -->
     <section class="dashboard">
 
         <div class="stat-card">
@@ -75,7 +73,6 @@
     </section>
 
 
-    <!-- SUBMIT WORKLOAD -->
     <section class="card">
 
         <div class="section-title">
@@ -117,7 +114,6 @@
     </section>
 
 
-    <!-- JOB QUEUE -->
     <section class="card">
 
         <div class="section-title">
@@ -147,7 +143,6 @@
     </section>
 
 
-    <!-- SCALING EXPERIMENTS (BURST TESTING) -->
     <section class="card">
 
         <div class="section-title">
@@ -187,7 +182,6 @@
 
         </div>
 
-        <!-- ACTIVE / SELECTED EXPERIMENT DISPLAY -->
         <div id="activeExpBox" class="exp-live-box" style="display: none;">
 
             <div class="exp-header">
@@ -202,7 +196,6 @@
                 </div>
             </div>
 
-            <!-- Progress Bar -->
             <div class="progress-container">
                 <div id="expProgressBar" class="progress-bar"></div>
             </div>
@@ -212,7 +205,6 @@
                 <span id="expElapsedText">Elapsed: 0.0 s</span>
             </div>
 
-            <!-- Experiment Metrics Grid -->
             <div id="expMetricsGrid" class="metrics-grid" style="display: none;">
 
                 <div class="metric-box">
@@ -257,7 +249,6 @@
 
             </div>
 
-            <!-- Worker Distribution Breakdown -->
             <div id="expWorkerDistSection" style="margin-top: 15px; display: none;">
                 <strong style="font-size: 13px; color: #475569;">Worker Job Allocation:</strong>
                 <div id="expWorkerChips" class="worker-chips"></div>
@@ -268,7 +259,6 @@
     </section>
 
 
-    <!-- EXPERIMENT HISTORY -->
     <section class="card">
 
         <div class="section-title">
@@ -315,7 +305,6 @@
     </section>
 
 
-    <!-- EXPERIMENT SCALABILITY COMPARISON -->
     <section id="expComparisonSection" class="card" style="display: none;">
 
         <div class="section-title">
@@ -329,7 +318,6 @@
             </button>
         </div>
 
-        <!-- Incompatibility / Validation Warning Banner -->
         <div id="compErrorBanner" style="display: none; background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 16px; border-radius: 9px; margin-bottom: 20px;">
             <div style="display: flex; align-items: flex-start; gap: 12px;">
                 <i class="fa-solid fa-triangle-exclamation" style="font-size: 20px; color: #dc2626; margin-top: 2px;"></i>
@@ -340,10 +328,8 @@
             </div>
         </div>
 
-        <!-- Valid Comparison Content -->
         <div id="compValidContent" style="display: none;">
 
-            <!-- Side-by-Side Comparison Table -->
             <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #1e293b;">
                 <i class="fa-solid fa-table-columns" style="color: #3b82f6; margin-right: 6px;"></i>Side-by-Side Metric Comparison
             </h3>
@@ -353,16 +339,13 @@
                     <thead>
                         <tr id="compTableHeadRow">
                             <th>Metric</th>
-                            <!-- Dynamically populated: 1 Worker, 2 Workers, ... -->
-                        </tr>
+                            </tr>
                     </thead>
                     <tbody id="compTableBody">
-                        <!-- Dynamically populated metric rows -->
-                    </tbody>
+                        </tbody>
                 </table>
             </div>
 
-            <!-- Charts Grid -->
             <h3 style="margin: 30px 0 15px 0; font-size: 16px; color: #1e293b;">
                 <i class="fa-solid fa-chart-area" style="color: #3b82f6; margin-right: 6px;"></i>Worker Scaling Curves
             </h3>
@@ -387,7 +370,6 @@
     </section>
 
 
-    <!-- PERFORMANCE COMPARISON -->
     <section class="card">
 
         <div class="section-title">
@@ -434,8 +416,7 @@
     </section>
 
 
-    <!-- CLOUD PLATFORM -->
-    <section class="card">
+    <!-- <section class="card">
 
         <h2>Cloud Platform Comparison</h2>
 
@@ -461,12 +442,12 @@
 
         </div>
 
-    </section>
+    </section> -->
 
-
+<!-- 
     <footer>
         CloudQueue © 2026 | Comparative Cloud Workload Processing
-    </footer>
+    </footer> -->
 
 </div>
 

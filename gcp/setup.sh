@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# CloudQueue - Automated GCP Setup Script
-# Configures a fresh Google Cloud Skills Boost VM / Debian / Ubuntu environment:
-# 1. Verifies/installs Git (apt install if missing with sudo/root)
-# 2. Detects active GCP Project via gcloud
-# 3. Verifies Python 3 availability
-# 4. Bootstraps pip locally without requiring sudo or root access
-# 5. Installs requirements.txt (handles PEP 668 user environments)
-# 6. Creates/verifies Pub/Sub topic (cloudqueue-jobs)
-# 7. Creates/verifies Pub/Sub subscription (cloudqueue-worker-sub)
-# 8. Configures CloudQueue GCP mode (.env)
-# 9. Initializes SQLite database and verifies required tables
-# 10. Configures GCP firewall rule (cloudqueue-allow-5000)
-# 11. Installs database backup cron job (every 5 minutes)
-# 12. Performs lightweight verification and displays safe summary
-# ==============================================================================
 
 set -eo pipefail
 
@@ -27,9 +11,6 @@ echo " CloudQueue: Automated GCP Setup"
 echo " Project root: $PROJECT_ROOT"
 echo "======================================================"
 
-# ------------------------------------------------------------------------------
-# 1. Check / Install Git
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 1: Checking Git installation..."
 if ! command -v git &>/dev/null; then
@@ -55,9 +36,6 @@ else
     echo "Git is already installed: $(git --version)"
 fi
 
-# ------------------------------------------------------------------------------
-# 2. Detect GCP Project via gcloud
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 2: Detecting GCP Project..."
 if ! command -v gcloud &>/dev/null; then
@@ -75,9 +53,6 @@ if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
 fi
 echo "Active GCP Project: $PROJECT_ID"
 
-# ------------------------------------------------------------------------------
-# 3. Detect Python 3 (no sudo assumed)
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 3: Checking Python 3..."
 if ! command -v python3 &>/dev/null; then
@@ -88,9 +63,6 @@ fi
 PYTHON_VERSION="$(python3 --version 2>&1)"
 echo "Detected: $PYTHON_VERSION"
 
-# ------------------------------------------------------------------------------
-# 4. Handle pip safely without sudo
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 4: Checking pip availability..."
 export PATH="$HOME/.local/bin:$PATH"
@@ -111,7 +83,6 @@ if ! python3 -m pip --version &>/dev/null; then
         echo "Error: Neither curl nor wget is available to download get-pip.py." >&2
         exit 1
     fi
-    # Invoke get-pip.py with --user and --break-system-packages for PEP 668 environments
     if ! python3 "$GET_PIP_TMP" --user --break-system-packages; then
         echo "Retrying get-pip.py without --break-system-packages..."
         python3 "$GET_PIP_TMP" --user || true
@@ -125,9 +96,6 @@ if ! python3 -m pip --version &>/dev/null; then
 fi
 echo "pip is ready: $(python3 -m pip --version 2>&1)"
 
-# ------------------------------------------------------------------------------
-# 5. Install Python dependencies from requirements.txt
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 5: Installing dependencies from requirements.txt..."
 if [ ! -f "requirements.txt" ]; then
@@ -135,7 +103,6 @@ if [ ! -f "requirements.txt" ]; then
     exit 1
 fi
 
-# Attempt user-level installation with --break-system-packages for PEP 668 compatibility
 if ! python3 -m pip install --user --break-system-packages -r requirements.txt; then
     echo "Retrying dependency installation without --break-system-packages (for older pip versions)..."
     if ! python3 -m pip install --user -r requirements.txt; then
@@ -150,9 +117,6 @@ if ! python3 -c "from google.cloud import pubsub_v1; print('Pub/Sub library OK')
     exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# 6. Check / Create Pub/Sub Topic
-# ------------------------------------------------------------------------------
 PUBSUB_TOPIC="cloudqueue-jobs"
 echo ""
 echo "==> Step 6: Checking Pub/Sub topic '$PUBSUB_TOPIC'..."
@@ -167,9 +131,6 @@ else
     echo "Topic '$PUBSUB_TOPIC' created successfully."
 fi
 
-# ------------------------------------------------------------------------------
-# 7. Check / Create Pub/Sub Subscription (shared by all workers)
-# ------------------------------------------------------------------------------
 PUBSUB_SUBSCRIPTION="cloudqueue-worker-sub"
 echo ""
 echo "==> Step 7: Checking Pub/Sub subscription '$PUBSUB_SUBSCRIPTION'..."
@@ -186,9 +147,6 @@ else
     echo "Subscription '$PUBSUB_SUBSCRIPTION' created successfully."
 fi
 
-# ------------------------------------------------------------------------------
-# 8. Configure CloudQueue Environment (.env)
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 8: Configuring CloudQueue environment (.env)..."
 ENV_FILE="$PROJECT_ROOT/.env"
@@ -203,9 +161,6 @@ PORT=5000
 EOF
 echo "Configuration written to .env for GCP mode."
 
-# ------------------------------------------------------------------------------
-# 9. Initialize SQLite Database Schema
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 9: Initializing SQLite database schema..."
 python3 -c "from app import init_db; init_db()"
@@ -222,9 +177,6 @@ if not required.issubset(tables):
 print('Database verified with tables: ' + ', '.join(sorted(list(required))))
 "
 
-# ------------------------------------------------------------------------------
-# 10. Configure GCP Firewall Rule
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 10: Configuring GCP firewall rule..."
 FIREWALL_SCRIPT="$PROJECT_ROOT/gcp/setup_firewall.sh"
@@ -235,9 +187,6 @@ else
     echo "Warning: Firewall script not found at $FIREWALL_SCRIPT" >&2
 fi
 
-# ------------------------------------------------------------------------------
-# 11. Configure Automated Database Backup Cron Job
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 11: Installing database backup cron job..."
 CRON_SETUP_SCRIPT="$PROJECT_ROOT/gcp/setup_backup_cron.sh"
@@ -248,9 +197,6 @@ else
     echo "Warning: Backup cron setup script not found at $CRON_SETUP_SCRIPT" >&2
 fi
 
-# ------------------------------------------------------------------------------
-# 12. Final Setup Verification & Safe Summary
-# ------------------------------------------------------------------------------
 echo ""
 echo "==> Step 12: Performing final checks..."
 python3 --version

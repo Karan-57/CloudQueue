@@ -9,7 +9,6 @@ _subscriber = None
 
 
 class MockPubSubMessage:
-    """Mock message container mirroring google.cloud.pubsub_v1 types."""
     def __init__(self, data: bytes, ack_id: str, attributes: Optional[Dict[str, str]] = None):
         self.data = data
         self.attributes = attributes or {}
@@ -18,10 +17,6 @@ class MockPubSubMessage:
 
 
 class MockPubSubBroker:
-    """
-    Offline Pub/Sub broker for testing without GCP credentials or emulator.
-    Provides in-memory queueing and SQLite IPC persistence matching Pub/Sub ACK/NACK behavior.
-    """
     def __init__(self, clear_db=False):
         import threading
         self.queue = []
@@ -171,7 +166,6 @@ _mock_broker = None
 
 
 def is_mock_enabled() -> bool:
-    """Returns True if the offline mock broker is enabled via environment."""
     return os.environ.get("CLOUDQUEUE_MOCK_PUBSUB", "false").strip().lower() in ("true", "1", "yes")
 
 
@@ -183,14 +177,12 @@ def get_mock_broker() -> MockPubSubBroker:
 
 
 def set_clients(publisher=None, subscriber=None):
-    """Overrides the publisher and subscriber clients (e.g., for test fixtures)."""
     global _publisher, _subscriber
     _publisher = publisher
     _subscriber = subscriber
 
 
 def get_publisher():
-    """Lazily initializes and returns the Google Cloud Pub/Sub PublisherClient."""
     global _publisher
     if _publisher is not None:
         return _publisher
@@ -205,7 +197,6 @@ def get_publisher():
 
 
 def get_subscriber():
-    """Lazily initializes and returns the Google Cloud Pub/Sub SubscriberClient."""
     global _subscriber
     if _subscriber is not None:
         return _subscriber
@@ -220,7 +211,6 @@ def get_subscriber():
 
 
 def get_topic_path(project_id: Optional[str] = None, topic_id: Optional[str] = None) -> str:
-    """Formats the fully-qualified Pub/Sub topic path."""
     proj = project_id or config.GOOGLE_CLOUD_PROJECT
     top = topic_id or config.PUBSUB_TOPIC
     if not proj:
@@ -234,7 +224,6 @@ def get_topic_path(project_id: Optional[str] = None, topic_id: Optional[str] = N
 
 
 def get_subscription_path(project_id: Optional[str] = None, subscription_id: Optional[str] = None) -> str:
-    """Formats the fully-qualified Pub/Sub subscription path."""
     proj = project_id or config.GOOGLE_CLOUD_PROJECT
     sub = subscription_id or config.PUBSUB_SUBSCRIPTION
     if not proj:
@@ -248,10 +237,6 @@ def get_subscription_path(project_id: Optional[str] = None, subscription_id: Opt
 
 
 def publish_job(job_id: int, experiment_id: Optional[str] = None, timeout: float = 10.0) -> str:
-    """
-    Publishes a single job ID to the Pub/Sub topic.
-    Message payload contains only the SQLite job_id reference to keep Pub/Sub lightweight.
-    """
     publisher = get_publisher()
     topic_path = get_topic_path()
 
@@ -269,7 +254,6 @@ def publish_jobs_batch(
     experiment_id: Optional[str] = None,
     timeout: float = 30.0
 ) -> List[str]:
-    """Publishes multiple job IDs in batch to the Pub/Sub topic."""
     publisher = get_publisher()
     topic_path = get_topic_path()
 
@@ -288,10 +272,6 @@ def pull_messages(
     timeout: float = 5.0,
     subscription_path: Optional[str] = None
 ) -> List[Any]:
-    """
-    Pulls up to `max_messages` from the configured Pub/Sub subscription.
-    Returns [] on timeout or empty subscription.
-    """
     subscriber = get_subscriber()
     sub_path = subscription_path or get_subscription_path()
 
@@ -315,7 +295,6 @@ def pull_messages(
 
 
 def acknowledge_message(ack_id: str, subscription_path: Optional[str] = None):
-    """Acknowledges a received message by its ack_id."""
     subscriber = get_subscriber()
     sub_path = subscription_path or get_subscription_path()
 
@@ -329,10 +308,6 @@ def acknowledge_message(ack_id: str, subscription_path: Optional[str] = None):
 
 
 def nack_message(ack_id: str, subscription_path: Optional[str] = None):
-    """
-    NACKs a message by resetting its ack deadline to 0 seconds,
-    making it immediately available for other workers.
-    """
     subscriber = get_subscriber()
     sub_path = subscription_path or get_subscription_path()
 

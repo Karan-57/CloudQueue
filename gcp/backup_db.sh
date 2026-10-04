@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# CloudQueue - Phase 5: Persistent SQLite Database Backup Script
-# Periodically backs up the authoritative SQLite database to GitHub.
-# Safe with active SQLite WAL mode (uses sqlite3.Connection.backup()).
-# Only commits and pushes when database changes are detected.
-# ==============================================================================
 
 set -eo pipefail
 
@@ -23,20 +17,14 @@ log() {
     echo "[$timestamp] $msg"
 }
 
-# ------------------------------------------------------------------------------
-# 1. Cron Helper Options (--install-cron / --remove-cron)
-# ------------------------------------------------------------------------------
 if [ "$1" = "--install-cron" ]; then
     echo "Installing CloudQueue database backup cron job (every 5 minutes)..."
     CRON_ENTRY="*/5 * * * * $SCRIPT_DIR/backup_db.sh >> $LOG_FILE 2>&1 # CLOUDQUEUE_DB_BACKUP"
 
-    # Read existing crontab
     EXISTING_CRON="$(crontab -l 2>/dev/null || true)"
 
-    # Remove any pre-existing entry with marker # CLOUDQUEUE_DB_BACKUP
     FILTERED_CRON="$(echo "$EXISTING_CRON" | grep -v "# CLOUDQUEUE_DB_BACKUP" || true)"
 
-    # Append the new single entry
     if [ -n "$FILTERED_CRON" ]; then
         NEW_CRONTAB="${FILTERED_CRON}
 ${CRON_ENTRY}"
@@ -74,9 +62,6 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     exit 0
 fi
 
-# ------------------------------------------------------------------------------
-# 2. Detect Python & Database Path
-# ------------------------------------------------------------------------------
 log "Starting database backup"
 
 if command -v python3 &>/dev/null; then
@@ -88,7 +73,6 @@ else
     exit 1
 fi
 
-# Determine configured database path via config.py (respecting .env)
 DB_REL_PATH="$("$PYTHON_CMD" -c "import config; print(config.DATABASE_PATH)" 2>/dev/null || echo "database/cloudqueue.db")"
 DB_SRC_PATH="$PROJECT_ROOT/$DB_REL_PATH"
 
@@ -98,16 +82,12 @@ if [ ! -f "$DB_SRC_PATH" ]; then
     exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# 3. Create Consistent SQLite Backup (WAL-Safe)
-# ------------------------------------------------------------------------------
 BACKUP_DIR="$PROJECT_ROOT/backups"
 BACKUP_FILE="$BACKUP_DIR/cloudqueue.db"
 TMP_BACKUP_FILE="$BACKUP_DIR/cloudqueue.db.tmp"
 
 mkdir -p "$BACKUP_DIR"
 
-# Perform atomic backup using Python sqlite3.Connection.backup()
 if ! "$PYTHON_CMD" -c "
 import sqlite3, sys, os
 
@@ -117,7 +97,6 @@ dst_path = sys.argv[2]
 if not os.path.exists(src_path):
     sys.exit(1)
 
-# Open source read-only to ensure active worker transactions are never locked
 src_conn = sqlite3.connect(f'file:{os.path.abspath(src_path)}?mode=ro', uri=True, timeout=30.0)
 dst_conn = sqlite3.connect(dst_path, timeout=30.0)
 
@@ -133,7 +112,6 @@ finally:
     exit 1
 fi
 
-# Verify the temporary backup is a valid SQLite database with expected schema
 if ! "$PYTHON_CMD" -c "
 import sqlite3, sys
 conn = sqlite3.connect(sys.argv[1])
@@ -151,13 +129,8 @@ if not required.issubset(tables):
     exit 1
 fi
 
-# Atomically move the verified backup into place
 mv "$TMP_BACKUP_FILE" "$BACKUP_FILE"
 
-# ------------------------------------------------------------------------------
-# 4. Check for Database Changes
-# ------------------------------------------------------------------------------
-# Check if the backup file differs from git index
 if [ -z "$(git status --short -- "backups/cloudqueue.db" 2>/dev/null || true)" ]; then
     log "No database changes detected"
     echo "No database changes detected. Nothing to commit."
@@ -166,9 +139,6 @@ fi
 
 log "Database changed"
 
-# ------------------------------------------------------------------------------
-# 5. Check Git Remote Configuration
-# ------------------------------------------------------------------------------
 if ! git remote -v 2>/dev/null | grep -q .; then
     log "Error: No Git remote configured."
     echo ""
@@ -177,10 +147,6 @@ if ! git remote -v 2>/dev/null | grep -q .; then
     exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# 6. Stage ONLY backups/cloudqueue.db & Commit
-# ------------------------------------------------------------------------------
-# Ensure git committer identity is present on fresh VMs
 if [ -z "$(git config user.name 2>/dev/null || true)" ]; then
     git config user.name "CloudQueue Backup Bot"
 fi
@@ -188,17 +154,12 @@ if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
     git config user.email "backup@cloudqueue.local"
 fi
 
-# Strict safety: ONLY stage the backup file (never git add .)
 git add "backups/cloudqueue.db"
 
 COMMIT_MSG="Update CloudQueue database backup - $(date '+%Y-%m-%d %H:%M:%S')"
 git commit -m "$COMMIT_MSG"
 log "Commit created"
 
-# ------------------------------------------------------------------------------
-# 7. Push to Configured Remote
-# ------------------------------------------------------------------------------
-# Detect remote and branch
 UPSTREAM_REMOTE="$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null | cut -d/ -f1 || true)"
 if [ -z "$UPSTREAM_REMOTE" ]; then
     UPSTREAM_REMOTE="$(git remote 2>/dev/null | head -n 1 || echo "origin")"

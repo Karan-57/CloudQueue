@@ -45,7 +45,6 @@ def run_worker_benchmark(num_workers, job_count=100, workload_type="CPU"):
     batch_info = submit_batch(count=job_count, workload_type=workload_type)
     print(f"[Producer] Submitted {job_count} jobs. Queue status: {batch_info['status']}")
 
-    # Start N worker processes concurrently
     processes = []
     start_time = time.time()
     
@@ -61,7 +60,6 @@ def run_worker_benchmark(num_workers, job_count=100, workload_type="CPU"):
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         processes.append((worker_id, p))
 
-    # Wait for all workers to finish
     for worker_id, p in processes:
         stdout, stderr = p.communicate()
         if stderr and "Traceback" in stderr:
@@ -69,7 +67,6 @@ def run_worker_benchmark(num_workers, job_count=100, workload_type="CPU"):
 
     total_experiment_time = round(time.time() - start_time, 3)
 
-    # Fetch stats from API
     stats = api_get("/stats")
     throughput = round(stats["completed"] / total_experiment_time, 2) if total_experiment_time > 0 else 0
 
@@ -84,7 +81,6 @@ def run_worker_benchmark(num_workers, job_count=100, workload_type="CPU"):
     print(f"Throughput                     : {throughput} jobs/sec")
     print(f"Worker Distribution            : {stats['workers']}")
 
-    # Verification checks
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(DISTINCT id) FROM jobs WHERE status = 'Completed'")
@@ -113,15 +109,12 @@ def run_worker_benchmark(num_workers, job_count=100, workload_type="CPU"):
 
 if __name__ == "__main__":
     results = []
-    # Test 1 worker
     results.append(run_worker_benchmark(num_workers=1, job_count=100, workload_type="CPU"))
     time.sleep(1)
 
-    # Test 2 workers
     results.append(run_worker_benchmark(num_workers=2, job_count=100, workload_type="CPU"))
     time.sleep(1)
 
-    # Test 4 workers
     results.append(run_worker_benchmark(num_workers=4, job_count=100, workload_type="CPU"))
 
     print("\n" + "=" * 60)

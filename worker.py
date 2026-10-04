@@ -23,18 +23,13 @@ def get_db():
     db_path = config.DATABASE_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30.0)
-    # WAL mode and busy timeout allow safe concurrent multi-process access
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.isolation_level = None  # Explicit transaction control
+    conn.isolation_level = None
     return conn
 
 
 def claim_job(conn, worker_id, experiment_id=None):
-    """
-    Atomically claims ONE queued job using BEGIN IMMEDIATE and UPDATE ... RETURNING.
-    Isolates experiment jobs when experiment_id is provided.
-    """
     table = "experiment_jobs" if experiment_id else "jobs"
     where_sub = "experiment_id = ? AND status = 'Queued'" if experiment_id else "status = 'Queued'"
     now = time.time()
@@ -74,11 +69,6 @@ def claim_job(conn, worker_id, experiment_id=None):
 
 
 def claim_specific_job(conn, job_id, worker_id, experiment_id=None):
-    """
-    Atomically claims a specific job ID received from Pub/Sub.
-    Returns: ('CLAIMED', job_data), ('ALREADY_COMPLETED', None),
-             ('ALREADY_PROCESSING', None), or ('NOT_FOUND', None).
-    """
     table = "experiment_jobs" if experiment_id else "jobs"
     where_sub = "WHERE id = ? AND experiment_id = ?" if experiment_id else "WHERE id = ?"
     check_params = (job_id, experiment_id) if experiment_id else (job_id,)
@@ -136,7 +126,6 @@ def claim_specific_job(conn, job_id, worker_id, experiment_id=None):
 
 
 def execute_workload(workload_type):
-    # Simulated workloads run outside the DB transaction to prevent holding locks
     start_time = time.time()
     if workload_type == "CPU":
         total = 0
@@ -197,11 +186,6 @@ def _count_queued(conn, table, experiment_id=None):
 
 
 def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experiment_id=None, worker_mode="normal"):
-    """
-    GCP Pub/Sub Worker execution loop.
-    Multiple workers pull from the shared Pub/Sub subscription, claim in SQLite,
-    execute workload, update DB, and ACK message.
-    """
     context_label = f"[{worker_id}" + (f":{experiment_id}]" if experiment_id else "]")
     print(f"{context_label} GCP Pub/Sub Worker started (PID: {os.getpid()}).")
     print(f"{context_label} Worker mode: {worker_mode}")
@@ -216,7 +200,6 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
 
     try:
         while True:
-            # Synchronous pull 1 message at a time to prevent hoarding among concurrent workers
             messages = pubsub_client.pull_messages(max_messages=1, timeout=2.0)
 
             if not messages:
@@ -255,7 +238,6 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
             job_id = payload.get("job_id")
             msg_exp_id = payload.get("experiment_id")
 
-            # Route message according to worker mode isolation
             if experiment_id and msg_exp_id != experiment_id:
                 pubsub_client.nack_message(ack_id)
                 time.sleep(0.05)
@@ -266,7 +248,6 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
                 time.sleep(0.05)
                 continue
 
-            # Atomically claim specific job in SQLite
             status_code, job_data = claim_specific_job(conn, job_id, worker_id, experiment_id=experiment_id)
 
             if status_code == "ALREADY_COMPLETED":
@@ -297,7 +278,6 @@ def run_gcp_worker(worker_id, poll_interval=0.5, exit_when_empty=False, experime
                 conn, claimed_id, submitted_at, work_start, work_end, experiment_id=experiment_id
             )
 
-            # ACK only AFTER successful SQLite completion write to prevent job loss
             pubsub_client.acknowledge_message(ack_id)
 
             jobs_processed += 1

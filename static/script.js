@@ -181,11 +181,6 @@ async function loadComparison() {
 
 }
 
-
-// ==============================================================================
-// Experiment System Frontend Functions
-// ==============================================================================
-
 let activeExpInterval = null;
 let currentInspectedExpId = null;
 
@@ -216,8 +211,6 @@ async function runExperiment() {
 
         const data = await response.json();
         const expId = data.experiment_id;
-
-        // Open live progress box
         const box = document.getElementById("activeExpBox");
         box.style.display = "block";
         document.getElementById("expTitle").innerText = expId;
@@ -230,11 +223,7 @@ async function runExperiment() {
 
         document.getElementById("expMetricsGrid").style.display = "none";
         document.getElementById("expWorkerDistSection").style.display = "none";
-
-        // Scroll smoothly to the experiment box
         box.scrollIntoView({ behavior: "smooth", block: "nearest" });
-
-        // Start polling live progress
         if (activeExpInterval) clearInterval(activeExpInterval);
         activeExpInterval = setInterval(() => pollExperiment(expId), 800);
 
@@ -251,8 +240,6 @@ async function pollExperiment(expId) {
         if (!response.ok) return;
 
         const data = await response.json();
-
-        // Update progress bar & counters
         const pct = data.progress.percentage;
         document.getElementById("expProgressBar").style.width = `${pct}%`;
         document.getElementById("expProgressText").innerText = `${data.progress.completed} / ${data.job_count} completed (${pct}%)`;
@@ -287,8 +274,6 @@ function displayCompletedExperiment(data) {
     document.getElementById("expProgressBar").style.width = "100%";
     document.getElementById("expProgressText").innerText = `${data.progress.completed} / ${data.job_count} completed (100%)`;
     document.getElementById("expElapsedText").innerText = `Total: ${data.total_time} s`;
-
-    // Populate Metrics
     document.getElementById("mTotalTime").innerText = `${data.metrics.total_time} s`;
     document.getElementById("mThroughput").innerText = `${data.metrics.throughput} j/s`;
     document.getElementById("mAvgWait").innerText = `${data.metrics.average_waiting_time} s`;
@@ -301,8 +286,6 @@ function displayCompletedExperiment(data) {
     document.getElementById("mEfficiency").innerText = `${eff}%`;
 
     document.getElementById("expMetricsGrid").style.display = "grid";
-
-    // Populate worker distribution
     const chipsContainer = document.getElementById("expWorkerChips");
     const dist = data.metrics.worker_distribution || {};
     const workerKeys = Object.keys(dist);
@@ -337,8 +320,6 @@ function onExpCheckboxChange(event, expId) {
         selectedExperimentIds.delete(expId);
     }
     updateSelectedCount();
-
-    // Update master selectAll checkbox state
     const allCheckboxes = document.querySelectorAll(".exp-select-checkbox:not(:disabled)");
     const master = document.getElementById("selectAllCheckbox");
     if (master && allCheckboxes.length > 0) {
@@ -411,8 +392,6 @@ async function inspectExperiment(expId) {
         const response = await fetch(`/experiments/${expId}`);
         const data = await response.json();
         displayCompletedExperiment(data);
-
-        // Re-render history table to update active row styling
         loadExperimentHistory();
 
         const box = document.getElementById("activeExpBox");
@@ -460,8 +439,6 @@ async function compareSelectedExperiments() {
             subtitle.innerText = "Incompatible experiments selected.";
             return;
         }
-
-        // Valid comparison
         errorBanner.style.display = "none";
         validContent.style.display = "block";
         subtitle.innerText = `Workload: ${data.workload_type} | Workload Size: ${data.job_count} jobs across ${data.experiments.length} configurations`;
@@ -479,8 +456,6 @@ async function compareSelectedExperiments() {
 function renderComparisonTable(experiments) {
     const headRow = document.getElementById("compTableHeadRow");
     const tbody = document.getElementById("compTableBody");
-
-    // Build header
     headRow.innerHTML = `
         <th>Metric</th>
         ${experiments.map(e => `
@@ -492,8 +467,6 @@ function renderComparisonTable(experiments) {
             </th>
         `).join("")}
     `;
-
-    // Define metrics rows
     const metrics = [
         { label: "Total Wall-Clock Time", key: "total_time", unit: "s", lowerBetter: true },
         { label: "Throughput", key: "throughput", unit: "jobs/s", lowerBetter: false },
@@ -526,8 +499,6 @@ function renderComparisonCharts(experiments) {
     }
 
     const labels = experiments.map(e => `${e.worker_count} Worker${e.worker_count > 1 ? 's' : ''}`);
-
-    // Chart 1: Total Time vs Workers
     const ctxTime = document.getElementById("chartTotalTime").getContext("2d");
     if (chartTotalTimeInstance) chartTotalTimeInstance.destroy();
     chartTotalTimeInstance = new Chart(ctxTime, {
@@ -559,8 +530,6 @@ function renderComparisonCharts(experiments) {
             }
         }
     });
-
-    // Chart 2: Throughput vs Workers
     const ctxThroughput = document.getElementById("chartThroughput").getContext("2d");
     if (chartThroughputInstance) chartThroughputInstance.destroy();
     chartThroughputInstance = new Chart(ctxThroughput, {
@@ -592,8 +561,6 @@ function renderComparisonCharts(experiments) {
             }
         }
     });
-
-    // Chart 3: Waiting Time vs Workers
     const ctxWait = document.getElementById("chartWaitingTime").getContext("2d");
     if (chartWaitingTimeInstance) chartWaitingTimeInstance.destroy();
     chartWaitingTimeInstance = new Chart(ctxWait, {

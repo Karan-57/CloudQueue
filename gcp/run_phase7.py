@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""
-CloudQueue - Phase 7: Real-GCP End-to-End Validation & Performance Benchmark Runner
-
-This script automates Phase 7 validation on a Google Cloud Skills Boost VM:
-  Phase 7A: Environment & prerequisite verification
-  Phase 7B: Live Pub/Sub smoke test (produce -> subscribe -> claim -> execute -> ACK)
-  Phase 7C: Controlled performance experiments (1, 2, 4, 8 workers on 100 CPU jobs)
-  Phase 7D: Experiment comparison verification
-  Phase 7E: Multi-worker competing consumer verification on shared subscription
-  Phase 7F: Two-VM architecture verification or documented quota limitation
-  Phase 7G: SQLite database backup & GitHub persistence
-  Phase 7H: Local database restoration instructions
-  Phase 7I: Comprehensive final validation report generation
-"""
-
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+   
 import argparse
 import json
 import os
@@ -27,7 +26,6 @@ import time
 import urllib.error
 import urllib.request
 
-# Ensure project root is in sys.path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 if PROJECT_ROOT not in sys.path:
@@ -35,15 +33,9 @@ if PROJECT_ROOT not in sys.path:
 
 import config
 
-
-# ------------------------------------------------------------------------------
-# Helpers: HTTP & Process Utilities
-# ------------------------------------------------------------------------------
-
 def get_api_url():
     port = getattr(config, "PORT", 5000)
     return f"http://127.0.0.1:{port}"
-
 
 def api_request(method, endpoint, payload=None, timeout=30.0):
     url = f"{get_api_url()}{endpoint}"
@@ -53,12 +45,10 @@ def api_request(method, endpoint, payload=None, timeout=30.0):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-
 def is_port_in_use(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
-
 
 def stop_process_on_port(port):
     if platform.system() == "Windows":
@@ -77,7 +67,6 @@ def stop_process_on_port(port):
         except Exception:
             pass
 
-
 def ensure_flask_running():
     port = getattr(config, "PORT", 5000)
     if is_port_in_use(port):
@@ -93,7 +82,6 @@ def ensure_flask_running():
     cmd = [sys.executable, "app.py"]
     proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdout=flask_log, stderr=flask_log, env=os.environ.copy())
 
-    # Wait for server to become responsive
     max_wait = 15.0
     start = time.time()
     while time.time() - start < max_wait:
@@ -108,14 +96,12 @@ def ensure_flask_running():
 
     raise RuntimeError(f"Flask server failed to start on port {port} within {max_wait}s.")
 
-
 def get_gcp_project():
-    # 1. Environment variable
+                             
     env_proj = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
     if env_proj:
         return env_proj.strip()
 
-    # 2. gcloud CLI
     try:
         res = subprocess.run(
             ["gcloud", "config", "get-value", "project"],
@@ -132,9 +118,8 @@ def get_gcp_project():
 
     return config.GOOGLE_CLOUD_PROJECT or None
 
-
 def get_vm_machine_type():
-    # Try querying GCP Compute Engine metadata server
+                                                     
     try:
         req = urllib.request.Request(
             "http://metadata.google.internal/computeMetadata/v1/instance/machine-type",
@@ -145,14 +130,9 @@ def get_vm_machine_type():
             return val.split("/")[-1]
     except Exception:
         pass
-    # Fallback to local CPU/OS description
+                                          
     cpu_count = os.cpu_count() or 1
     return f"{platform.system()} ({cpu_count} vCPUs)"
-
-
-# ------------------------------------------------------------------------------
-# Phase 7A: Setup Verification
-# ------------------------------------------------------------------------------
 
 def verify_phase_7a(project_id, is_mock=False):
     print("\n" + "=" * 65)
@@ -165,7 +145,6 @@ def verify_phase_7a(project_id, is_mock=False):
 
     print(f"2. Python Executable     : {sys.executable} ({sys.version.split()[0]})")
 
-    # Import Pub/Sub SDK
     try:
         from google.cloud import pubsub_v1
         print("3. Google Cloud Pub/Sub  : Successfully imported google.cloud.pubsub_v1")
@@ -174,7 +153,6 @@ def verify_phase_7a(project_id, is_mock=False):
             raise RuntimeError(f"Failed to import google-cloud-pubsub: {e}. Run ./gcp/setup.sh.")
         print("3. Google Cloud Pub/Sub  : (Mock mode enabled)")
 
-    # Verify SQLite DB
     db_path = config.DATABASE_PATH
     if not os.path.isabs(db_path):
         db_path = os.path.join(PROJECT_ROOT, db_path)
@@ -196,7 +174,6 @@ def verify_phase_7a(project_id, is_mock=False):
         raise RuntimeError(f"SQLite database validation failed (tables: {tables}, integrity: {chk})")
     print(f"4. SQLite Database       : Valid ({db_path}) with tables: {', '.join(sorted(required))}")
 
-    # Mode configuration
     print(f"5. CloudQueue Mode       : {config.CLOUDQUEUE_MODE}")
     print(f"6. Pub/Sub Topic         : {config.PUBSUB_TOPIC}")
     print(f"7. Pub/Sub Subscription  : {config.PUBSUB_SUBSCRIPTION}")
@@ -211,17 +188,11 @@ def verify_phase_7a(project_id, is_mock=False):
         "db_path": db_path
     }
 
-
-# ------------------------------------------------------------------------------
-# Phase 7B: Real Pub/Sub Smoke Test
-# ------------------------------------------------------------------------------
-
 def verify_phase_7b():
     print("\n" + "=" * 65)
     print(" PHASE 7B: Real Pub/Sub Smoke Test")
     print("=" * 65)
 
-    # Clean any stale Queued jobs from previous aborted test runs
     conn = sqlite3.connect(config.DATABASE_PATH)
     conn.execute("UPDATE jobs SET status = 'Failed' WHERE status = 'Queued'")
     conn.commit()
@@ -235,7 +206,6 @@ def verify_phase_7b():
     job_id = submit_res.get("job_id")
     print(f"  -> Job #{job_id} submitted to queue. Status: {submit_res.get('status')}")
 
-    # Launch 1 worker with --exit-when-empty
     print(f"Starting worker to consume Job #{job_id} from {config.PUBSUB_SUBSCRIPTION}...")
     cmd = [
         sys.executable,
@@ -247,7 +217,6 @@ def verify_phase_7b():
     ]
     proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30.0, env=os.environ.copy())
 
-    # Verify SQLite status
     conn = sqlite3.connect(config.DATABASE_PATH)
     c = conn.cursor()
     c.execute("""
@@ -276,11 +245,6 @@ def verify_phase_7b():
         "total_latency": tot_lat
     }
 
-
-# ------------------------------------------------------------------------------
-# Phase 7C: Controlled Performance Experiments
-# ------------------------------------------------------------------------------
-
 def run_performance_experiments(worker_counts=(1, 2, 4, 8), job_count=100, workload_type="CPU"):
     print("\n" + "=" * 65)
     print(" PHASE 7C: Controlled Performance Experiments")
@@ -300,8 +264,7 @@ def run_performance_experiments(worker_counts=(1, 2, 4, 8), job_count=100, workl
         exp_id = run_res["experiment_id"]
         print(f"  -> Dispatched {exp_id} (Workers: {workers}). Waiting for completion...")
 
-        # Poll until completed
-        max_timeout = 300.0  # 5 minutes max per experiment
+        max_timeout = 300.0                                
         poll_start = time.time()
         completed_exp = None
 
@@ -318,7 +281,6 @@ def run_performance_experiments(worker_counts=(1, 2, 4, 8), job_count=100, workl
         if completed_exp["status"] != "Completed":
             raise RuntimeError(f"Experiment {exp_id} failed with status: {completed_exp['status']}.")
 
-        # Deep verification on SQLite experiment_jobs
         conn = sqlite3.connect(config.DATABASE_PATH)
         c = conn.cursor()
         c.execute("""
@@ -372,11 +334,6 @@ def run_performance_experiments(worker_counts=(1, 2, 4, 8), job_count=100, workl
 
     return results
 
-
-# ------------------------------------------------------------------------------
-# Phase 7D: Experiment Comparison Verification
-# ------------------------------------------------------------------------------
-
 def verify_phase_7d(experiment_ids):
     print("\n" + "=" * 65)
     print(" PHASE 7D: Experiment Comparison Verification")
@@ -401,11 +358,6 @@ def verify_phase_7d(experiment_ids):
 
     return comp_res
 
-
-# ------------------------------------------------------------------------------
-# Phase 7E: Multi-Worker Shared Subscription Verification
-# ------------------------------------------------------------------------------
-
 def verify_phase_7e():
     print("\n" + "=" * 65)
     print(" PHASE 7E: Real GCP Multi-Worker Verification (Shared Subscription)")
@@ -422,7 +374,6 @@ def verify_phase_7e():
     last_id = batch_res["last_job_id"]
     print(f"  -> Queued jobs #{first_id} through #{last_id}")
 
-    # Launch 4 concurrent workers with --exit-when-empty
     print(f"Starting 4 concurrent workers pulling from '{config.PUBSUB_SUBSCRIPTION}'...")
     worker_procs = []
     for i in range(1, 5):
@@ -438,11 +389,9 @@ def verify_phase_7e():
         p = subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=os.environ.copy())
         worker_procs.append((w_id, p))
 
-    # Wait for all workers to finish
     for w_id, p in worker_procs:
         p.communicate(timeout=60.0)
 
-    # Inspect SQLite distribution among the burst jobs
     conn = sqlite3.connect(config.DATABASE_PATH)
     c = conn.cursor()
     c.execute("""
@@ -474,11 +423,6 @@ def verify_phase_7e():
 
     return dist
 
-
-# ------------------------------------------------------------------------------
-# Phase 7G: SQLite Backup & GitHub Persistence
-# ------------------------------------------------------------------------------
-
 def verify_phase_7g(skip_backup=False):
     print("\n" + "=" * 65)
     print(" PHASE 7G: Persistent SQLite Backup Verification")
@@ -492,7 +436,6 @@ def verify_phase_7g(skip_backup=False):
     if not os.path.isfile(backup_script):
         raise FileNotFoundError(f"Backup script not found: {backup_script}")
 
-    # Determine bash executable
     bash_cmd = "bash"
     if platform.system() == "Windows" and os.path.exists(r"C:\Program Files\Git\bin\bash.exe"):
         bash_cmd = r"C:\Program Files\Git\bin\bash.exe"
@@ -507,7 +450,6 @@ def verify_phase_7g(skip_backup=False):
     if not os.path.isfile(backup_file):
         raise RuntimeError(f"Expected backup file does not exist: {backup_file}")
 
-    # Validate backup file integrity
     conn = sqlite3.connect(backup_file)
     c = conn.cursor()
     c.execute("PRAGMA integrity_check;")
@@ -527,11 +469,6 @@ def verify_phase_7g(skip_backup=False):
         "backup_file": backup_file,
         "experiments_backed_up": exp_count
     }
-
-
-# ------------------------------------------------------------------------------
-# Phase 7I: Final Validation Report Generator
-# ------------------------------------------------------------------------------
 
 def generate_report(env_meta, smoke_meta, perf_results, multi_dist, backup_meta, two_vm_note):
     report_lines = [
@@ -613,11 +550,6 @@ def generate_report(env_meta, smoke_meta, perf_results, multi_dist, backup_meta,
 
     return "\n".join(report_lines)
 
-
-# ------------------------------------------------------------------------------
-# Main Orchestrator
-# ------------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(description="CloudQueue Phase 7 Real-GCP End-to-End Benchmark Runner")
     parser.add_argument("--job-count", type=int, default=100, help="Number of jobs per experiment (default: 100)")
@@ -644,40 +576,32 @@ def main():
 
     project_id = get_gcp_project()
 
-    # Phase 7A
     env_meta = verify_phase_7a(project_id, is_mock=args.mock)
 
-    # Ensure Flask server is running
     flask_proc = ensure_flask_running()
 
     try:
-        # Phase 7B
+                  
         smoke_meta = verify_phase_7b()
 
-        # Phase 7C
         perf_results = run_performance_experiments(
             worker_counts=worker_counts,
             job_count=args.job_count,
             workload_type=args.workload
         )
 
-        # Phase 7D
         exp_ids = [p["experiment_id"] for p in perf_results]
         verify_phase_7d(exp_ids)
 
-        # Phase 7E
         multi_dist = verify_phase_7e()
 
-        # Phase 7F
         if args.two_vm_host:
             two_vm_note = f"Two-VM demonstration verified with secondary host: `{args.two_vm_host}`. Workers on both VMs consumed from `cloudqueue-worker-sub`."
         else:
             two_vm_note = "Two-VM demonstration skipped: Google Cloud Skills Boost lab session provides a single VM quota. Multi-worker competing consumer behavior across independent processes sharing `cloudqueue-worker-sub` was verified on the VM."
 
-        # Phase 7G
         backup_meta = verify_phase_7g(skip_backup=args.skip_backup)
 
-        # Phase 7I: Generate Final Report
         report = generate_report(env_meta, smoke_meta, perf_results, multi_dist, backup_meta, two_vm_note)
 
         report_path = os.path.join(PROJECT_ROOT, ".gcp", "phase7_validation_report.md")
@@ -696,7 +620,6 @@ def main():
             print("\n[Phase 7] Stopping background Flask server...")
             flask_proc.terminate()
             flask_proc.wait()
-
 
 if __name__ == "__main__":
     main()

@@ -15,8 +15,6 @@ body {
     padding: 35px;
 }
 
-/* HEADER */
-
 header {
     display: flex;
     justify-content: space-between;
@@ -34,7 +32,7 @@ header p {
     color: #6b7280;
 }
 
-.live {
+/* .live {
     background: white;
     padding: 10px 16px;
     border-radius: 20px;
@@ -49,10 +47,8 @@ header p {
     background: #22c55e;
     border-radius: 50%;
     margin-right: 7px;
-}
+} */
 
-
-/* DASHBOARD */
 
 .dashboard {
     display: grid;
@@ -93,8 +89,6 @@ header p {
 }
 
 
-/* CARD */
-
 .card {
     background: white;
     padding: 25px;
@@ -121,8 +115,6 @@ header p {
 }
 
 
-/* FORM */
-
 .form {
     display: flex;
     gap: 12px;
@@ -145,8 +137,6 @@ select {
     width: 220px;
 }
 
-
-/* BUTTON */
 
 button {
     padding: 13px 19px;
@@ -185,8 +175,6 @@ button:hover {
 }
 
 
-/* JOB */
-
 .job {
     border: 1px solid #e5e7eb;
     padding: 17px;
@@ -210,8 +198,6 @@ button:hover {
 }
 
 
-/* TABLE */
-
 .table-container {
     overflow-x: auto;
 }
@@ -234,8 +220,6 @@ td {
     font-size: 14px;
 }
 
-
-/* PLATFORM */
 
 .platforms {
     display: grid;
@@ -278,18 +262,12 @@ td {
 }
 
 
-/* EMPTY */
-
 .empty {
     color: #6b7280;
     text-align: center;
     padding: 20px;
 }
 
-
-/* FOOTER */
-
-/* EXPERIMENT SYSTEM */
 
 .exp-live-box {
     background: #f8fafc;
@@ -470,8 +448,6 @@ footer {
     padding: 30px 0 10px;
 }
 
-
-/* RESPONSIVE */
 
 @media (max-width: 800px) {
 
